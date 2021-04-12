@@ -1,0 +1,1574 @@
+   1               		.file	"sd.c"
+   2               	__SP_H__ = 0x3e
+   3               	__SP_L__ = 0x3d
+   4               	__SREG__ = 0x3f
+   5               	__tmp_reg__ = 0
+   6               	__zero_reg__ = 1
+   7               		.text
+   8               	.Ltext0:
+   9               		.cfi_sections	.debug_frame
+  11               	_spi_xchg:
+  12               	.LVL0:
+  13               	.LFB6:
+  14               		.file 1 "sd.c"
+   1:sd.c          **** #include "sd.h"
+   2:sd.c          **** #include <string.h>
+   3:sd.c          **** #include <avr/io.h>
+   4:sd.c          **** #include <util/delay.h>
+   5:sd.c          **** 
+   6:sd.c          **** #if \
+   7:sd.c          **** 	defined(__AVR_ATmega8__) || \
+   8:sd.c          **** 	defined(__AVR_ATmega48__) || \
+   9:sd.c          **** 	defined(__AVR_ATmega48P__) || \
+  10:sd.c          **** 	defined(__AVR_ATmega88__) || \
+  11:sd.c          **** 	defined(__AVR_ATmega88P__) || \
+  12:sd.c          **** 	defined(__AVR_ATmega168__) || \
+  13:sd.c          **** 	defined(__AVR_ATmega168P__) || \
+  14:sd.c          **** 	defined(__AVR_ATmega328P__)
+  15:sd.c          **** 
+  16:sd.c          **** #define SPI_DIR                DDRB
+  17:sd.c          **** #define SPI_OUT                PORTB
+  18:sd.c          **** #define MOSI                   (1 << 3)
+  19:sd.c          **** #define SCK                    (1 << 5)
+  20:sd.c          **** #define CS                     (1 << 2)
+  21:sd.c          **** #define MISO                   (1 << 4)
+  22:sd.c          **** 
+  23:sd.c          **** #elif \
+  24:sd.c          **** 	defined(__AVR_ATmega16__) || \
+  25:sd.c          **** 	defined(__AVR_ATmega32__)
+  26:sd.c          **** 
+  27:sd.c          **** #define SPI_DIR                DDRB
+  28:sd.c          **** #define SPI_OUT                PORTB
+  29:sd.c          **** #define MOSI                   (1 << 5)
+  30:sd.c          **** #define SCK                    (1 << 7)
+  31:sd.c          **** #define CS                     (1 << 4)
+  32:sd.c          **** #define MISO                   (1 << 6)
+  33:sd.c          **** 
+  34:sd.c          **** #elif \
+  35:sd.c          **** 	defined(__AVR_ATmega64__) || \
+  36:sd.c          **** 	defined(__AVR_ATmega128__) || \
+  37:sd.c          **** 	defined(__AVR_ATmega169__)
+  38:sd.c          **** 
+  39:sd.c          **** #define SPI_DIR                DDRB
+  40:sd.c          **** #define SPI_OUT                PORTB
+  41:sd.c          **** #define MOSI                   (1 << 2)
+  42:sd.c          **** #define SCK                    (1 << 1)
+  43:sd.c          **** #define CS                     (1 << 0)
+  44:sd.c          **** #define MISO                   (1 << 3)
+  45:sd.c          **** 
+  46:sd.c          **** #else
+  47:sd.c          **** #error "Target AVR not supported: No pin mappings available."
+  48:sd.c          **** #endif
+  49:sd.c          **** 
+  50:sd.c          **** #define CONF_SPI() { SPI_DIR |= MOSI | SCK | CS; SPI_DIR &= ~MISO; }
+  51:sd.c          **** #define SELECT()               SPI_OUT &= ~CS
+  52:sd.c          **** #define DESELECT()             SPI_OUT |= CS
+  53:sd.c          **** 
+  54:sd.c          **** #define CMD_GO_IDLE_STATE      0x00
+  55:sd.c          **** #define CMD_SEND_OP_COND       0x01
+  56:sd.c          **** #define CMD_SEND_IF_COND       0x08
+  57:sd.c          **** #define CMD_SEND_CSD           0x09
+  58:sd.c          **** #define CMD_SEND_CID           0x0A
+  59:sd.c          **** #define CMD_SET_BLOCKLEN       0x10
+  60:sd.c          **** #define CMD_READ_SINGLE_BLOCK  0x11
+  61:sd.c          **** #define CMD_WRITE_SINGLE_BLOCK 0x18
+  62:sd.c          **** #define CMD_SD_SEND_OP_COND    0x29
+  63:sd.c          **** #define CMD_APP                0x37
+  64:sd.c          **** #define CMD_READ_OCR           0x3A
+  65:sd.c          **** 
+  66:sd.c          **** #define IDLE_STATE             (1 << 0)
+  67:sd.c          **** #define ILLEGAL_CMD            (1 << 2)
+  68:sd.c          **** 
+  69:sd.c          **** #define SD_1                   (1 << 0)
+  70:sd.c          **** #define SD_2                   (1 << 1)
+  71:sd.c          **** #define SD_HC                  (1 << 2)
+  72:sd.c          **** 
+  73:sd.c          **** static uint8_t _card_type;
+  74:sd.c          **** 
+  75:sd.c          **** static uint8_t _spi_xchg(uint8_t b)
+  76:sd.c          **** {
+  15               		.loc 1 76 1 view -0
+  16               		.cfi_startproc
+  17               	/* prologue: function */
+  18               	/* frame size = 0 */
+  19               	/* stack size = 0 */
+  20               	.L__stack_usage = 0
+  77:sd.c          **** 	SPDR = b;
+  21               		.loc 1 77 2 view .LVU1
+  22               		.loc 1 77 7 is_stmt 0 view .LVU2
+  23 0000 8EBD      		out 0x2e,r24
+  78:sd.c          **** 	while(!(SPSR & (1 << SPIF))) ;
+  24               		.loc 1 78 2 is_stmt 1 view .LVU3
+  25               	.L2:
+  26               		.loc 1 78 31 discriminator 1 view .LVU4
+  27               		.loc 1 78 7 is_stmt 0 discriminator 1 view .LVU5
+  28 0002 0DB4      		in __tmp_reg__,0x2d
+  29 0004 07FE      		sbrs __tmp_reg__,7
+  30 0006 00C0      		rjmp .L2
+  79:sd.c          **** 	SPSR &= ~(1 << SPIF);
+  31               		.loc 1 79 2 is_stmt 1 view .LVU6
+  32               		.loc 1 79 7 is_stmt 0 view .LVU7
+  33 0008 8DB5      		in r24,0x2d
+  34               	.LVL1:
+  35               		.loc 1 79 7 view .LVU8
+  36 000a 8F77      		andi r24,lo8(127)
+  37 000c 8DBD      		out 0x2d,r24
+  38               	.LVL2:
+  80:sd.c          **** 	return SPDR;
+  39               		.loc 1 80 2 is_stmt 1 view .LVU9
+  40               		.loc 1 80 9 is_stmt 0 view .LVU10
+  41 000e 8EB5      		in r24,0x2e
+  42               	/* epilogue start */
+  81:sd.c          **** }
+  43               		.loc 1 81 1 view .LVU11
+  44 0010 0895      		ret
+  45               		.cfi_endproc
+  46               	.LFE6:
+  49               	_command:
+  50               	.LVL3:
+  51               	.LFB7:
+  82:sd.c          **** 
+  83:sd.c          **** static uint8_t _command(uint8_t cmd, uint32_t arg)
+  84:sd.c          **** {
+  52               		.loc 1 84 1 is_stmt 1 view -0
+  53               		.cfi_startproc
+  54               		.loc 1 84 1 is_stmt 0 view .LVU13
+  55 0012 FF92      		push r15
+  56               	.LCFI0:
+  57               		.cfi_def_cfa_offset 3
+  58               		.cfi_offset 15, -2
+  59 0014 0F93      		push r16
+  60               	.LCFI1:
+  61               		.cfi_def_cfa_offset 4
+  62               		.cfi_offset 16, -3
+  63 0016 1F93      		push r17
+  64               	.LCFI2:
+  65               		.cfi_def_cfa_offset 5
+  66               		.cfi_offset 17, -4
+  67 0018 CF93      		push r28
+  68               	.LCFI3:
+  69               		.cfi_def_cfa_offset 6
+  70               		.cfi_offset 28, -5
+  71 001a DF93      		push r29
+  72               	.LCFI4:
+  73               		.cfi_def_cfa_offset 7
+  74               		.cfi_offset 29, -6
+  75               	/* prologue: function */
+  76               	/* frame size = 0 */
+  77               	/* stack size = 5 */
+  78               	.L__stack_usage = 5
+  79 001c C82F      		mov r28,r24
+  80 001e D42F      		mov r29,r20
+  81 0020 152F      		mov r17,r21
+  82 0022 062F      		mov r16,r22
+  83 0024 F72E      		mov r15,r23
+  85:sd.c          **** 	uint8_t i, response;
+  84               		.loc 1 85 2 is_stmt 1 view .LVU14
+  86:sd.c          **** 	_spi_xchg(0xFF);
+  85               		.loc 1 86 2 view .LVU15
+  86 0026 8FEF      		ldi r24,lo8(-1)
+  87               	.LVL4:
+  88               		.loc 1 86 2 is_stmt 0 view .LVU16
+  89 0028 0E94 0000 		call _spi_xchg
+  90               	.LVL5:
+  87:sd.c          **** 	_spi_xchg(0x40 | cmd);
+  91               		.loc 1 87 2 is_stmt 1 view .LVU17
+  92 002c 8C2F      		mov r24,r28
+  93 002e 8064      		ori r24,lo8(64)
+  94 0030 0E94 0000 		call _spi_xchg
+  95               	.LVL6:
+  88:sd.c          **** 	_spi_xchg((arg >> 24) & 0xFF);
+  96               		.loc 1 88 2 view .LVU18
+  97 0034 8F2D      		mov r24,r15
+  98 0036 0E94 0000 		call _spi_xchg
+  99               	.LVL7:
+  89:sd.c          **** 	_spi_xchg((arg >> 16) & 0xFF);
+ 100               		.loc 1 89 2 view .LVU19
+ 101 003a 802F      		mov r24,r16
+ 102 003c 0E94 0000 		call _spi_xchg
+ 103               	.LVL8:
+  90:sd.c          **** 	_spi_xchg((arg >> 8) & 0xFF);
+ 104               		.loc 1 90 2 view .LVU20
+ 105 0040 812F      		mov r24,r17
+ 106 0042 0E94 0000 		call _spi_xchg
+ 107               	.LVL9:
+  91:sd.c          **** 	_spi_xchg((arg >> 0) & 0xFF);
+ 108               		.loc 1 91 2 view .LVU21
+ 109 0046 8D2F      		mov r24,r29
+ 110 0048 0E94 0000 		call _spi_xchg
+ 111               	.LVL10:
+  92:sd.c          **** 	switch(cmd)
+ 112               		.loc 1 92 2 view .LVU22
+  93:sd.c          **** 	{
+  94:sd.c          **** 	case CMD_GO_IDLE_STATE:
+  95:sd.c          **** 		_spi_xchg(0x95);
+ 113               		.loc 1 95 3 is_stmt 0 view .LVU23
+ 114 004c 85E9      		ldi r24,lo8(-107)
+  92:sd.c          **** 	switch(cmd)
+ 115               		.loc 1 92 2 view .LVU24
+ 116 004e CC23      		tst r28
+ 117 0050 01F0      		breq .L14
+  96:sd.c          **** 		break;
+  97:sd.c          **** 
+  98:sd.c          **** 	case CMD_SEND_IF_COND:
+  99:sd.c          **** 		_spi_xchg(0x87);
+ 118               		.loc 1 99 3 view .LVU25
+ 119 0052 87E8      		ldi r24,lo8(-121)
+  92:sd.c          **** 	{
+ 120               		.loc 1 92 2 view .LVU26
+ 121 0054 C830      		cpi r28,lo8(8)
+ 122 0056 01F0      		breq .L14
+ 100:sd.c          **** 		break;
+ 101:sd.c          **** 
+ 102:sd.c          **** 	default:
+ 103:sd.c          **** 		_spi_xchg(0xFF);
+ 123               		.loc 1 103 3 is_stmt 1 view .LVU27
+ 124 0058 8FEF      		ldi r24,lo8(-1)
+ 125               	.L14:
+  99:sd.c          **** 		break;
+ 126               		.loc 1 99 3 is_stmt 0 view .LVU28
+ 127 005a 0E94 0000 		call _spi_xchg
+ 128               	.LVL11:
+ 100:sd.c          **** 		break;
+ 129               		.loc 1 100 3 is_stmt 1 view .LVU29
+  84:sd.c          **** 	uint8_t i, response;
+ 130               		.loc 1 84 1 is_stmt 0 view .LVU30
+ 131 005e CAE0      		ldi r28,lo8(10)
+ 132               	.LVL12:
+ 133               	.L9:
+ 104:sd.c          **** 		break;
+ 105:sd.c          **** 	}
+ 106:sd.c          **** 
+ 107:sd.c          **** 	for(i = 0; i < 10 && ((response = _spi_xchg(0xFF)) == 0xFF); ++i) ;
+ 134               		.loc 1 107 36 discriminator 3 view .LVU31
+ 135 0060 8FEF      		ldi r24,lo8(-1)
+ 136 0062 0E94 0000 		call _spi_xchg
+ 137               	.LVL13:
+ 138               		.loc 1 107 20 discriminator 3 view .LVU32
+ 139 0066 8F3F      		cpi r24,lo8(-1)
+ 140 0068 01F4      		brne .L4
+ 141               		.loc 1 107 68 is_stmt 1 discriminator 4 view .LVU33
+ 142               	.LVL14:
+ 143               		.loc 1 107 68 is_stmt 0 discriminator 4 view .LVU34
+ 144 006a C150      		subi r28,lo8(-(-1))
+ 145               	.LVL15:
+ 146               		.loc 1 107 2 discriminator 4 view .LVU35
+ 147 006c 01F4      		brne .L9
+ 148               	.LVL16:
+ 149               	.L4:
+ 150               	/* epilogue start */
+ 108:sd.c          **** 	return response;
+ 109:sd.c          **** }
+ 151               		.loc 1 109 1 view .LVU36
+ 152 006e DF91      		pop r29
+ 153 0070 CF91      		pop r28
+ 154 0072 1F91      		pop r17
+ 155 0074 0F91      		pop r16
+ 156 0076 FF90      		pop r15
+ 157 0078 0895      		ret
+ 158               		.cfi_endproc
+ 159               	.LFE7:
+ 161               	.global	sd_init
+ 163               	sd_init:
+ 164               	.LFB8:
+ 110:sd.c          **** 
+ 111:sd.c          **** uint8_t sd_init(void)
+ 112:sd.c          **** {
+ 165               		.loc 1 112 1 is_stmt 1 view -0
+ 166               		.cfi_startproc
+ 167 007a CF92      		push r12
+ 168               	.LCFI5:
+ 169               		.cfi_def_cfa_offset 3
+ 170               		.cfi_offset 12, -2
+ 171 007c DF92      		push r13
+ 172               	.LCFI6:
+ 173               		.cfi_def_cfa_offset 4
+ 174               		.cfi_offset 13, -3
+ 175 007e EF92      		push r14
+ 176               	.LCFI7:
+ 177               		.cfi_def_cfa_offset 5
+ 178               		.cfi_offset 14, -4
+ 179 0080 FF92      		push r15
+ 180               	.LCFI8:
+ 181               		.cfi_def_cfa_offset 6
+ 182               		.cfi_offset 15, -5
+ 183 0082 0F93      		push r16
+ 184               	.LCFI9:
+ 185               		.cfi_def_cfa_offset 7
+ 186               		.cfi_offset 16, -6
+ 187 0084 1F93      		push r17
+ 188               	.LCFI10:
+ 189               		.cfi_def_cfa_offset 8
+ 190               		.cfi_offset 17, -7
+ 191 0086 CF93      		push r28
+ 192               	.LCFI11:
+ 193               		.cfi_def_cfa_offset 9
+ 194               		.cfi_offset 28, -8
+ 195 0088 DF93      		push r29
+ 196               	.LCFI12:
+ 197               		.cfi_def_cfa_offset 10
+ 198               		.cfi_offset 29, -9
+ 199               	/* prologue: function */
+ 200               	/* frame size = 0 */
+ 201               	/* stack size = 8 */
+ 202               	.L__stack_usage = 8
+ 113:sd.c          **** 	uint8_t response;
+ 203               		.loc 1 113 2 view .LVU38
+ 114:sd.c          **** 	uint16_t i;
+ 204               		.loc 1 114 2 view .LVU39
+ 115:sd.c          **** 	uint32_t arg;
+ 205               		.loc 1 115 2 view .LVU40
+ 116:sd.c          **** 
+ 117:sd.c          **** 	CONF_SPI();
+ 206               		.loc 1 117 2 view .LVU41
+ 207 008a 84B1      		in r24,0x4
+ 208 008c 8C62      		ori r24,lo8(44)
+ 209 008e 84B9      		out 0x4,r24
+ 210               		.loc 1 117 2 view .LVU42
+ 211 0090 2498      		cbi 0x4,4
+ 212               		.loc 1 117 12 view .LVU43
+ 118:sd.c          **** 	DESELECT();
+ 213               		.loc 1 118 2 view .LVU44
+ 214 0092 2A9A      		sbi 0x5,2
+ 119:sd.c          **** 	SPCR = (0 << SPIE) | (1 << SPE)  | (0 << DORD) | (1 << MSTR) |
+ 215               		.loc 1 119 2 view .LVU45
+ 216               		.loc 1 119 7 is_stmt 0 view .LVU46
+ 217 0094 83E5      		ldi r24,lo8(83)
+ 218 0096 8CBD      		out 0x2c,r24
+ 120:sd.c          **** 		(0 << CPOL) | (0 << CPHA) | (1 << SPR1) | (1 << SPR0);
+ 121:sd.c          **** 	SPSR &= ~(1 << SPI2X);
+ 219               		.loc 1 121 2 is_stmt 1 view .LVU47
+ 220               		.loc 1 121 7 is_stmt 0 view .LVU48
+ 221 0098 8DB5      		in r24,0x2d
+ 222 009a 8E7F      		andi r24,lo8(-2)
+ 223 009c 8DBD      		out 0x2d,r24
+ 122:sd.c          **** 	_card_type = 0;
+ 224               		.loc 1 122 2 is_stmt 1 view .LVU49
+ 225               		.loc 1 122 13 is_stmt 0 view .LVU50
+ 226 009e 1092 0000 		sts _card_type,__zero_reg__
+ 123:sd.c          **** 	for(i = 0; i < 10; ++i)
+ 227               		.loc 1 123 2 is_stmt 1 view .LVU51
+ 228               	.LVL17:
+ 122:sd.c          **** 	_card_type = 0;
+ 229               		.loc 1 122 13 is_stmt 0 view .LVU52
+ 230 00a2 CAE0      		ldi r28,lo8(10)
+ 231 00a4 D0E0      		ldi r29,0
+ 232               	.LVL18:
+ 233               	.L16:
+ 124:sd.c          **** 	{
+ 125:sd.c          **** 		_spi_xchg(0xFF);
+ 234               		.loc 1 125 3 is_stmt 1 discriminator 3 view .LVU53
+ 235 00a6 8FEF      		ldi r24,lo8(-1)
+ 236 00a8 0E94 0000 		call _spi_xchg
+ 237               	.LVL19:
+ 238               		.loc 1 125 3 is_stmt 0 discriminator 3 view .LVU54
+ 239 00ac 2197      		sbiw r28,1
+ 240               	.LVL20:
+ 123:sd.c          **** 	for(i = 0; i < 10; ++i)
+ 241               		.loc 1 123 2 discriminator 3 view .LVU55
+ 242 00ae 01F4      		brne .L16
+ 126:sd.c          **** 	}
+ 127:sd.c          **** 
+ 128:sd.c          **** 	SELECT();
+ 243               		.loc 1 128 2 is_stmt 1 view .LVU56
+ 244 00b0 2A98      		cbi 0x5,2
+ 129:sd.c          **** 	for(i = 0; ; ++i)
+ 245               		.loc 1 129 2 view .LVU57
+ 246               	.LVL21:
+ 128:sd.c          **** 	for(i = 0; ; ++i)
+ 247               		.loc 1 128 2 is_stmt 0 view .LVU58
+ 248 00b2 00E0      		ldi r16,0
+ 249 00b4 12E0      		ldi r17,lo8(2)
+ 250               	.LVL22:
+ 251               	.L18:
+ 130:sd.c          **** 	{
+ 131:sd.c          **** 		if(_command(CMD_GO_IDLE_STATE, 0) == IDLE_STATE)
+ 252               		.loc 1 131 3 is_stmt 1 view .LVU59
+ 253               		.loc 1 131 6 is_stmt 0 view .LVU60
+ 254 00b6 40E0      		ldi r20,0
+ 255 00b8 50E0      		ldi r21,0
+ 256 00ba BA01      		movw r22,r20
+ 257 00bc 80E0      		ldi r24,0
+ 258 00be 0E94 0000 		call _command
+ 259               	.LVL23:
+ 260 00c2 C82F      		mov r28,r24
+ 261               		.loc 1 131 5 view .LVU61
+ 262 00c4 8130      		cpi r24,lo8(1)
+ 263 00c6 01F0      		breq .L17
+ 132:sd.c          **** 		{
+ 133:sd.c          **** 			break;
+ 134:sd.c          **** 		}
+ 135:sd.c          **** 
+ 136:sd.c          **** 		if(i == 0x1ff)
+ 264               		.loc 1 136 3 is_stmt 1 view .LVU62
+ 265 00c8 0150      		subi r16,1
+ 266 00ca 1109      		sbc r17,__zero_reg__
+ 267               	.LVL24:
+ 268               		.loc 1 136 5 is_stmt 0 view .LVU63
+ 269 00cc 01F4      		brne .L18
+ 137:sd.c          **** 		{
+ 138:sd.c          **** 			DESELECT();
+ 270               		.loc 1 138 4 is_stmt 1 view .LVU64
+ 271 00ce 2A9A      		sbi 0x5,2
+ 139:sd.c          **** 			return 1;
+ 272               		.loc 1 139 4 view .LVU65
+ 273               		.loc 1 139 11 is_stmt 0 view .LVU66
+ 274 00d0 C1E0      		ldi r28,lo8(1)
+ 275               	.LVL25:
+ 276               	.L15:
+ 140:sd.c          **** 		}
+ 141:sd.c          **** 	}
+ 142:sd.c          **** 
+ 143:sd.c          **** 	if((_command(CMD_SEND_IF_COND, 0x1AA) & ILLEGAL_CMD) == 0)
+ 144:sd.c          **** 	{
+ 145:sd.c          **** 		_spi_xchg(0xFF);
+ 146:sd.c          **** 		_spi_xchg(0xFF);
+ 147:sd.c          **** 		if(((_spi_xchg(0xFF) & 0x01) == 0) ||
+ 148:sd.c          **** 			(_spi_xchg(0xFF) != 0xAA))
+ 149:sd.c          **** 		{
+ 150:sd.c          **** 			return 1;
+ 151:sd.c          **** 		}
+ 152:sd.c          **** 
+ 153:sd.c          **** 		_card_type |= SD_2;
+ 154:sd.c          **** 	}
+ 155:sd.c          **** 	else
+ 156:sd.c          **** 	{
+ 157:sd.c          **** 		_command(CMD_APP, 0);
+ 158:sd.c          **** 		if((_command(CMD_SD_SEND_OP_COND, 0) & ILLEGAL_CMD) == 0)
+ 159:sd.c          **** 		{
+ 160:sd.c          **** 			_card_type |= SD_1;
+ 161:sd.c          **** 		}
+ 162:sd.c          **** 	}
+ 163:sd.c          **** 
+ 164:sd.c          **** 	for(i = 0; ; ++i)
+ 165:sd.c          **** 	{
+ 166:sd.c          **** 		if(_card_type & (SD_1 | SD_2))
+ 167:sd.c          **** 		{
+ 168:sd.c          **** 			arg = 0;
+ 169:sd.c          **** 			if(_card_type & SD_2)
+ 170:sd.c          **** 			{
+ 171:sd.c          **** 				arg = 0x40000000;
+ 172:sd.c          **** 			}
+ 173:sd.c          **** 
+ 174:sd.c          **** 			_command(CMD_APP, 0);
+ 175:sd.c          **** 			response = _command(CMD_SD_SEND_OP_COND, arg);
+ 176:sd.c          **** 		}
+ 177:sd.c          **** 		else
+ 178:sd.c          **** 		{
+ 179:sd.c          **** 			response = _command(CMD_SEND_OP_COND, 0);
+ 180:sd.c          **** 		}
+ 181:sd.c          **** 
+ 182:sd.c          **** 		if((response & IDLE_STATE) == 0)
+ 183:sd.c          **** 		{
+ 184:sd.c          **** 			break;
+ 185:sd.c          **** 		}
+ 186:sd.c          **** 
+ 187:sd.c          **** 		if(i == 0x7FFF)
+ 188:sd.c          **** 		{
+ 189:sd.c          **** 			DESELECT();
+ 190:sd.c          **** 			return 1;
+ 191:sd.c          **** 		}
+ 192:sd.c          **** 	}
+ 193:sd.c          **** 
+ 194:sd.c          **** 	if(_card_type & SD_2)
+ 195:sd.c          **** 	{
+ 196:sd.c          **** 		if(_command(CMD_READ_OCR, 0))
+ 197:sd.c          **** 		{
+ 198:sd.c          **** 			DESELECT();
+ 199:sd.c          **** 			return 1;
+ 200:sd.c          **** 		}
+ 201:sd.c          **** 
+ 202:sd.c          **** 		if(_spi_xchg(0xFF) & 0x40)
+ 203:sd.c          **** 		{
+ 204:sd.c          **** 			_card_type |= SD_HC;
+ 205:sd.c          **** 		}
+ 206:sd.c          **** 
+ 207:sd.c          **** 		_spi_xchg(0xFF);
+ 208:sd.c          **** 		_spi_xchg(0xFF);
+ 209:sd.c          **** 		_spi_xchg(0xFF);
+ 210:sd.c          **** 	}
+ 211:sd.c          **** 
+ 212:sd.c          **** 	if(_command(CMD_SET_BLOCKLEN, 512))
+ 213:sd.c          **** 	{
+ 214:sd.c          **** 		DESELECT();
+ 215:sd.c          **** 		return 1;
+ 216:sd.c          **** 	}
+ 217:sd.c          **** 
+ 218:sd.c          **** 	DESELECT();
+ 219:sd.c          **** 	SPCR &= ~((1 << SPR1) | (1 << SPR0));
+ 220:sd.c          **** 	SPSR |= (1 << SPI2X);
+ 221:sd.c          **** 	_delay_ms(20);
+ 222:sd.c          **** 	return 0;
+ 223:sd.c          **** }
+ 277               		.loc 1 223 1 view .LVU67
+ 278 00d2 8C2F      		mov r24,r28
+ 279               	/* epilogue start */
+ 280 00d4 DF91      		pop r29
+ 281 00d6 CF91      		pop r28
+ 282 00d8 1F91      		pop r17
+ 283 00da 0F91      		pop r16
+ 284 00dc FF90      		pop r15
+ 285 00de EF90      		pop r14
+ 286 00e0 DF90      		pop r13
+ 287 00e2 CF90      		pop r12
+ 288 00e4 0895      		ret
+ 289               	.LVL26:
+ 290               	.L17:
+ 143:sd.c          **** 	{
+ 291               		.loc 1 143 2 is_stmt 1 view .LVU68
+ 143:sd.c          **** 	{
+ 292               		.loc 1 143 6 is_stmt 0 view .LVU69
+ 293 00e6 4AEA      		ldi r20,lo8(-86)
+ 294 00e8 51E0      		ldi r21,lo8(1)
+ 295 00ea 60E0      		ldi r22,0
+ 296 00ec 70E0      		ldi r23,0
+ 297 00ee 88E0      		ldi r24,lo8(8)
+ 298 00f0 0E94 0000 		call _command
+ 299               	.LVL27:
+ 143:sd.c          **** 	{
+ 300               		.loc 1 143 4 view .LVU70
+ 301 00f4 82FD      		sbrc r24,2
+ 302 00f6 00C0      		rjmp .L20
+ 145:sd.c          **** 		_spi_xchg(0xFF);
+ 303               		.loc 1 145 3 is_stmt 1 view .LVU71
+ 304 00f8 8FEF      		ldi r24,lo8(-1)
+ 305 00fa 0E94 0000 		call _spi_xchg
+ 306               	.LVL28:
+ 146:sd.c          **** 		if(((_spi_xchg(0xFF) & 0x01) == 0) ||
+ 307               		.loc 1 146 3 view .LVU72
+ 308 00fe 8FEF      		ldi r24,lo8(-1)
+ 309 0100 0E94 0000 		call _spi_xchg
+ 310               	.LVL29:
+ 147:sd.c          **** 			(_spi_xchg(0xFF) != 0xAA))
+ 311               		.loc 1 147 3 view .LVU73
+ 147:sd.c          **** 			(_spi_xchg(0xFF) != 0xAA))
+ 312               		.loc 1 147 8 is_stmt 0 view .LVU74
+ 313 0104 8FEF      		ldi r24,lo8(-1)
+ 314 0106 0E94 0000 		call _spi_xchg
+ 315               	.LVL30:
+ 147:sd.c          **** 			(_spi_xchg(0xFF) != 0xAA))
+ 316               		.loc 1 147 5 view .LVU75
+ 317 010a 80FF      		sbrs r24,0
+ 318 010c 00C0      		rjmp .L15
+ 148:sd.c          **** 		{
+ 319               		.loc 1 148 5 discriminator 1 view .LVU76
+ 320 010e 8FEF      		ldi r24,lo8(-1)
+ 321 0110 0E94 0000 		call _spi_xchg
+ 322               	.LVL31:
+ 147:sd.c          **** 			(_spi_xchg(0xFF) != 0xAA))
+ 323               		.loc 1 147 38 discriminator 1 view .LVU77
+ 324 0114 8A3A      		cpi r24,lo8(-86)
+ 325 0116 01F4      		brne .L15
+ 153:sd.c          **** 	}
+ 326               		.loc 1 153 3 is_stmt 1 view .LVU78
+ 153:sd.c          **** 	}
+ 327               		.loc 1 153 14 is_stmt 0 view .LVU79
+ 328 0118 8091 0000 		lds r24,_card_type
+ 329 011c 8260      		ori r24,lo8(2)
+ 330               	.L43:
+ 160:sd.c          **** 		}
+ 331               		.loc 1 160 15 view .LVU80
+ 332 011e 8093 0000 		sts _card_type,r24
+ 333               	.L23:
+ 128:sd.c          **** 	for(i = 0; ; ++i)
+ 334               		.loc 1 128 2 view .LVU81
+ 335 0122 00E0      		ldi r16,0
+ 336 0124 10E8      		ldi r17,lo8(-128)
+ 337               	.LVL32:
+ 338               	.L28:
+ 166:sd.c          **** 		{
+ 339               		.loc 1 166 3 is_stmt 1 view .LVU82
+ 166:sd.c          **** 		{
+ 340               		.loc 1 166 17 is_stmt 0 view .LVU83
+ 341 0126 8091 0000 		lds r24,_card_type
+ 166:sd.c          **** 		{
+ 342               		.loc 1 166 5 view .LVU84
+ 343 012a 982F      		mov r25,r24
+ 344 012c 9370      		andi r25,lo8(3)
+ 345 012e 01F0      		breq .L24
+ 168:sd.c          **** 			if(_card_type & SD_2)
+ 346               		.loc 1 168 4 is_stmt 1 view .LVU85
+ 347               	.LVL33:
+ 169:sd.c          **** 			{
+ 348               		.loc 1 169 4 view .LVU86
+ 168:sd.c          **** 			if(_card_type & SD_2)
+ 349               		.loc 1 168 8 is_stmt 0 view .LVU87
+ 350 0130 C12C      		mov r12,__zero_reg__
+ 351 0132 D12C      		mov r13,__zero_reg__
+ 352 0134 7601      		movw r14,r12
+ 169:sd.c          **** 			{
+ 353               		.loc 1 169 6 view .LVU88
+ 354 0136 81FF      		sbrs r24,1
+ 355 0138 00C0      		rjmp .L25
+ 171:sd.c          **** 			}
+ 356               		.loc 1 171 9 view .LVU89
+ 357 013a C12C      		mov r12,__zero_reg__
+ 358 013c D12C      		mov r13,__zero_reg__
+ 359 013e E12C      		mov r14,__zero_reg__
+ 360 0140 80E4      		ldi r24,lo8(64)
+ 361 0142 F82E      		mov r15,r24
+ 362               	.L25:
+ 363               	.LVL34:
+ 174:sd.c          **** 			response = _command(CMD_SD_SEND_OP_COND, arg);
+ 364               		.loc 1 174 4 is_stmt 1 view .LVU90
+ 365 0144 40E0      		ldi r20,0
+ 366 0146 50E0      		ldi r21,0
+ 367 0148 BA01      		movw r22,r20
+ 368 014a 87E3      		ldi r24,lo8(55)
+ 369 014c 0E94 0000 		call _command
+ 370               	.LVL35:
+ 175:sd.c          **** 		}
+ 371               		.loc 1 175 4 view .LVU91
+ 175:sd.c          **** 		}
+ 372               		.loc 1 175 15 is_stmt 0 view .LVU92
+ 373 0150 B701      		movw r22,r14
+ 374 0152 A601      		movw r20,r12
+ 375 0154 89E2      		ldi r24,lo8(41)
+ 376               	.LVL36:
+ 377               	.L44:
+ 179:sd.c          **** 		}
+ 378               		.loc 1 179 15 view .LVU93
+ 379 0156 0E94 0000 		call _command
+ 380               	.LVL37:
+ 182:sd.c          **** 		{
+ 381               		.loc 1 182 3 is_stmt 1 view .LVU94
+ 182:sd.c          **** 		{
+ 382               		.loc 1 182 5 is_stmt 0 view .LVU95
+ 383 015a 982F      		mov r25,r24
+ 384 015c 9170      		andi r25,lo8(1)
+ 385 015e 80FF      		sbrs r24,0
+ 386 0160 00C0      		rjmp .L27
+ 187:sd.c          **** 		{
+ 387               		.loc 1 187 3 is_stmt 1 view .LVU96
+ 388 0162 0150      		subi r16,1
+ 389 0164 1109      		sbc r17,__zero_reg__
+ 390               	.LVL38:
+ 187:sd.c          **** 		{
+ 391               		.loc 1 187 5 is_stmt 0 view .LVU97
+ 392 0166 01F4      		brne .L28
+ 189:sd.c          **** 			return 1;
+ 393               		.loc 1 189 4 is_stmt 1 view .LVU98
+ 394 0168 2A9A      		sbi 0x5,2
+ 190:sd.c          **** 		}
+ 395               		.loc 1 190 4 view .LVU99
+ 190:sd.c          **** 		}
+ 396               		.loc 1 190 11 is_stmt 0 view .LVU100
+ 397 016a C92F      		mov r28,r25
+ 398 016c 00C0      		rjmp .L15
+ 399               	.LVL39:
+ 400               	.L20:
+ 157:sd.c          **** 		if((_command(CMD_SD_SEND_OP_COND, 0) & ILLEGAL_CMD) == 0)
+ 401               		.loc 1 157 3 is_stmt 1 view .LVU101
+ 402 016e 40E0      		ldi r20,0
+ 403 0170 50E0      		ldi r21,0
+ 404 0172 BA01      		movw r22,r20
+ 405 0174 87E3      		ldi r24,lo8(55)
+ 406 0176 0E94 0000 		call _command
+ 407               	.LVL40:
+ 158:sd.c          **** 		{
+ 408               		.loc 1 158 3 view .LVU102
+ 158:sd.c          **** 		{
+ 409               		.loc 1 158 7 is_stmt 0 view .LVU103
+ 410 017a 40E0      		ldi r20,0
+ 411 017c 50E0      		ldi r21,0
+ 412 017e BA01      		movw r22,r20
+ 413 0180 89E2      		ldi r24,lo8(41)
+ 414 0182 0E94 0000 		call _command
+ 415               	.LVL41:
+ 158:sd.c          **** 		{
+ 416               		.loc 1 158 5 view .LVU104
+ 417 0186 82FD      		sbrc r24,2
+ 418 0188 00C0      		rjmp .L23
+ 160:sd.c          **** 		}
+ 419               		.loc 1 160 4 is_stmt 1 view .LVU105
+ 160:sd.c          **** 		}
+ 420               		.loc 1 160 15 is_stmt 0 view .LVU106
+ 421 018a 8091 0000 		lds r24,_card_type
+ 422 018e 8160      		ori r24,lo8(1)
+ 423 0190 00C0      		rjmp .L43
+ 424               	.LVL42:
+ 425               	.L24:
+ 179:sd.c          **** 		}
+ 426               		.loc 1 179 4 is_stmt 1 view .LVU107
+ 179:sd.c          **** 		}
+ 427               		.loc 1 179 15 is_stmt 0 view .LVU108
+ 428 0192 40E0      		ldi r20,0
+ 429 0194 50E0      		ldi r21,0
+ 430 0196 BA01      		movw r22,r20
+ 431 0198 81E0      		ldi r24,lo8(1)
+ 432 019a 00C0      		rjmp .L44
+ 433               	.LVL43:
+ 434               	.L27:
+ 194:sd.c          **** 	{
+ 435               		.loc 1 194 2 is_stmt 1 view .LVU109
+ 194:sd.c          **** 	{
+ 436               		.loc 1 194 16 is_stmt 0 view .LVU110
+ 437 019c D091 0000 		lds r29,_card_type
+ 194:sd.c          **** 	{
+ 438               		.loc 1 194 4 view .LVU111
+ 439 01a0 D1FF      		sbrs r29,1
+ 440 01a2 00C0      		rjmp .L29
+ 196:sd.c          **** 		{
+ 441               		.loc 1 196 3 is_stmt 1 view .LVU112
+ 196:sd.c          **** 		{
+ 442               		.loc 1 196 6 is_stmt 0 view .LVU113
+ 443 01a4 40E0      		ldi r20,0
+ 444 01a6 50E0      		ldi r21,0
+ 445 01a8 BA01      		movw r22,r20
+ 446 01aa 8AE3      		ldi r24,lo8(58)
+ 447               	.LVL44:
+ 196:sd.c          **** 		{
+ 448               		.loc 1 196 6 view .LVU114
+ 449 01ac 0E94 0000 		call _command
+ 450               	.LVL45:
+ 196:sd.c          **** 		{
+ 451               		.loc 1 196 5 view .LVU115
+ 452 01b0 8823      		tst r24
+ 453 01b2 01F0      		breq .L30
+ 198:sd.c          **** 			return 1;
+ 454               		.loc 1 198 4 is_stmt 1 view .LVU116
+ 455 01b4 2A9A      		sbi 0x5,2
+ 199:sd.c          **** 		}
+ 456               		.loc 1 199 4 view .LVU117
+ 199:sd.c          **** 		}
+ 457               		.loc 1 199 11 is_stmt 0 view .LVU118
+ 458 01b6 00C0      		rjmp .L15
+ 459               	.L30:
+ 202:sd.c          **** 		{
+ 460               		.loc 1 202 3 is_stmt 1 view .LVU119
+ 202:sd.c          **** 		{
+ 461               		.loc 1 202 6 is_stmt 0 view .LVU120
+ 462 01b8 8FEF      		ldi r24,lo8(-1)
+ 463 01ba 0E94 0000 		call _spi_xchg
+ 464               	.LVL46:
+ 202:sd.c          **** 		{
+ 465               		.loc 1 202 5 view .LVU121
+ 466 01be 86FF      		sbrs r24,6
+ 467 01c0 00C0      		rjmp .L31
+ 204:sd.c          **** 		}
+ 468               		.loc 1 204 4 is_stmt 1 view .LVU122
+ 204:sd.c          **** 		}
+ 469               		.loc 1 204 15 is_stmt 0 view .LVU123
+ 470 01c2 D460      		ori r29,lo8(4)
+ 471 01c4 D093 0000 		sts _card_type,r29
+ 472               	.L31:
+ 207:sd.c          **** 		_spi_xchg(0xFF);
+ 473               		.loc 1 207 3 is_stmt 1 view .LVU124
+ 474 01c8 8FEF      		ldi r24,lo8(-1)
+ 475 01ca 0E94 0000 		call _spi_xchg
+ 476               	.LVL47:
+ 208:sd.c          **** 		_spi_xchg(0xFF);
+ 477               		.loc 1 208 3 view .LVU125
+ 478 01ce 8FEF      		ldi r24,lo8(-1)
+ 479 01d0 0E94 0000 		call _spi_xchg
+ 480               	.LVL48:
+ 209:sd.c          **** 	}
+ 481               		.loc 1 209 3 view .LVU126
+ 482 01d4 8FEF      		ldi r24,lo8(-1)
+ 483 01d6 0E94 0000 		call _spi_xchg
+ 484               	.LVL49:
+ 485               	.L29:
+ 212:sd.c          **** 	{
+ 486               		.loc 1 212 2 view .LVU127
+ 212:sd.c          **** 	{
+ 487               		.loc 1 212 5 is_stmt 0 view .LVU128
+ 488 01da 40E0      		ldi r20,0
+ 489 01dc 52E0      		ldi r21,lo8(2)
+ 490 01de 60E0      		ldi r22,0
+ 491 01e0 70E0      		ldi r23,0
+ 492 01e2 80E1      		ldi r24,lo8(16)
+ 493 01e4 0E94 0000 		call _command
+ 494               	.LVL50:
+ 214:sd.c          **** 		return 1;
+ 495               		.loc 1 214 3 view .LVU129
+ 496 01e8 2A9A      		sbi 0x5,2
+ 212:sd.c          **** 	{
+ 497               		.loc 1 212 4 view .LVU130
+ 498 01ea 8111      		cpse r24,__zero_reg__
+ 499 01ec 00C0      		rjmp .L15
+ 218:sd.c          **** 	SPCR &= ~((1 << SPR1) | (1 << SPR0));
+ 500               		.loc 1 218 2 is_stmt 1 view .LVU131
+ 219:sd.c          **** 	SPSR |= (1 << SPI2X);
+ 501               		.loc 1 219 2 view .LVU132
+ 219:sd.c          **** 	SPSR |= (1 << SPI2X);
+ 502               		.loc 1 219 7 is_stmt 0 view .LVU133
+ 503 01ee 8CB5      		in r24,0x2c
+ 504 01f0 8C7F      		andi r24,lo8(-4)
+ 505 01f2 8CBD      		out 0x2c,r24
+ 220:sd.c          **** 	_delay_ms(20);
+ 506               		.loc 1 220 2 is_stmt 1 view .LVU134
+ 220:sd.c          **** 	_delay_ms(20);
+ 507               		.loc 1 220 7 is_stmt 0 view .LVU135
+ 508 01f4 8DB5      		in r24,0x2d
+ 509 01f6 8160      		ori r24,lo8(1)
+ 510 01f8 8DBD      		out 0x2d,r24
+ 221:sd.c          **** 	return 0;
+ 511               		.loc 1 221 2 is_stmt 1 view .LVU136
+ 512               	.LVL51:
+ 513               	.LBB4:
+ 514               	.LBI4:
+ 515               		.file 2 "/usr/avr/include/util/delay.h"
+   1:/usr/avr/include/util/delay.h **** /* Copyright (c) 2002, Marek Michalkiewicz
+   2:/usr/avr/include/util/delay.h ****    Copyright (c) 2004,2005,2007 Joerg Wunsch
+   3:/usr/avr/include/util/delay.h ****    Copyright (c) 2007  Florin-Viorel Petrov
+   4:/usr/avr/include/util/delay.h ****    All rights reserved.
+   5:/usr/avr/include/util/delay.h **** 
+   6:/usr/avr/include/util/delay.h ****    Redistribution and use in source and binary forms, with or without
+   7:/usr/avr/include/util/delay.h ****    modification, are permitted provided that the following conditions are met:
+   8:/usr/avr/include/util/delay.h **** 
+   9:/usr/avr/include/util/delay.h ****    * Redistributions of source code must retain the above copyright
+  10:/usr/avr/include/util/delay.h ****      notice, this list of conditions and the following disclaimer.
+  11:/usr/avr/include/util/delay.h **** 
+  12:/usr/avr/include/util/delay.h ****    * Redistributions in binary form must reproduce the above copyright
+  13:/usr/avr/include/util/delay.h ****      notice, this list of conditions and the following disclaimer in
+  14:/usr/avr/include/util/delay.h ****      the documentation and/or other materials provided with the
+  15:/usr/avr/include/util/delay.h ****      distribution.
+  16:/usr/avr/include/util/delay.h **** 
+  17:/usr/avr/include/util/delay.h ****    * Neither the name of the copyright holders nor the names of
+  18:/usr/avr/include/util/delay.h ****      contributors may be used to endorse or promote products derived
+  19:/usr/avr/include/util/delay.h ****      from this software without specific prior written permission.
+  20:/usr/avr/include/util/delay.h **** 
+  21:/usr/avr/include/util/delay.h ****   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+  22:/usr/avr/include/util/delay.h ****   AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+  23:/usr/avr/include/util/delay.h ****   IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+  24:/usr/avr/include/util/delay.h ****   ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+  25:/usr/avr/include/util/delay.h ****   LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+  26:/usr/avr/include/util/delay.h ****   CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+  27:/usr/avr/include/util/delay.h ****   SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+  28:/usr/avr/include/util/delay.h ****   INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+  29:/usr/avr/include/util/delay.h ****   CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+  30:/usr/avr/include/util/delay.h ****   ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+  31:/usr/avr/include/util/delay.h ****   POSSIBILITY OF SUCH DAMAGE. */
+  32:/usr/avr/include/util/delay.h **** 
+  33:/usr/avr/include/util/delay.h **** /* $Id: delay.h.in 2506 2016-02-08 10:05:45Z joerg_wunsch $ */
+  34:/usr/avr/include/util/delay.h **** 
+  35:/usr/avr/include/util/delay.h **** #ifndef _UTIL_DELAY_H_
+  36:/usr/avr/include/util/delay.h **** #define _UTIL_DELAY_H_ 1
+  37:/usr/avr/include/util/delay.h **** 
+  38:/usr/avr/include/util/delay.h **** #ifndef __DOXYGEN__
+  39:/usr/avr/include/util/delay.h **** #  ifndef __HAS_DELAY_CYCLES
+  40:/usr/avr/include/util/delay.h **** #    define __HAS_DELAY_CYCLES 1
+  41:/usr/avr/include/util/delay.h **** #  endif
+  42:/usr/avr/include/util/delay.h **** #endif  /* __DOXYGEN__ */
+  43:/usr/avr/include/util/delay.h **** 
+  44:/usr/avr/include/util/delay.h **** #include <inttypes.h>
+  45:/usr/avr/include/util/delay.h **** #include <util/delay_basic.h>
+  46:/usr/avr/include/util/delay.h **** #include <math.h>
+  47:/usr/avr/include/util/delay.h **** 
+  48:/usr/avr/include/util/delay.h **** /** \file */
+  49:/usr/avr/include/util/delay.h **** /** \defgroup util_delay <util/delay.h>: Convenience functions for busy-wait delay loops
+  50:/usr/avr/include/util/delay.h ****     \code
+  51:/usr/avr/include/util/delay.h ****     #define F_CPU 1000000UL  // 1 MHz
+  52:/usr/avr/include/util/delay.h ****     //#define F_CPU 14.7456E6
+  53:/usr/avr/include/util/delay.h ****     #include <util/delay.h>
+  54:/usr/avr/include/util/delay.h ****     \endcode
+  55:/usr/avr/include/util/delay.h **** 
+  56:/usr/avr/include/util/delay.h ****     \note As an alternative method, it is possible to pass the
+  57:/usr/avr/include/util/delay.h ****     F_CPU macro down to the compiler from the Makefile.
+  58:/usr/avr/include/util/delay.h ****     Obviously, in that case, no \c \#define statement should be
+  59:/usr/avr/include/util/delay.h ****     used.
+  60:/usr/avr/include/util/delay.h **** 
+  61:/usr/avr/include/util/delay.h ****     The functions in this header file are wrappers around the basic
+  62:/usr/avr/include/util/delay.h ****     busy-wait functions from <util/delay_basic.h>.  They are meant as
+  63:/usr/avr/include/util/delay.h ****     convenience functions where actual time values can be specified
+  64:/usr/avr/include/util/delay.h ****     rather than a number of cycles to wait for.  The idea behind is
+  65:/usr/avr/include/util/delay.h ****     that compile-time constant expressions will be eliminated by
+  66:/usr/avr/include/util/delay.h ****     compiler optimization so floating-point expressions can be used
+  67:/usr/avr/include/util/delay.h ****     to calculate the number of delay cycles needed based on the CPU
+  68:/usr/avr/include/util/delay.h ****     frequency passed by the macro F_CPU.
+  69:/usr/avr/include/util/delay.h **** 
+  70:/usr/avr/include/util/delay.h ****     \note In order for these functions to work as intended, compiler
+  71:/usr/avr/include/util/delay.h ****     optimizations <em>must</em> be enabled, and the delay time
+  72:/usr/avr/include/util/delay.h ****     <em>must</em> be an expression that is a known constant at
+  73:/usr/avr/include/util/delay.h ****     compile-time.  If these requirements are not met, the resulting
+  74:/usr/avr/include/util/delay.h ****     delay will be much longer (and basically unpredictable), and
+  75:/usr/avr/include/util/delay.h ****     applications that otherwise do not use floating-point calculations
+  76:/usr/avr/include/util/delay.h ****     will experience severe code bloat by the floating-point library
+  77:/usr/avr/include/util/delay.h ****     routines linked into the application.
+  78:/usr/avr/include/util/delay.h **** 
+  79:/usr/avr/include/util/delay.h ****     The functions available allow the specification of microsecond, and
+  80:/usr/avr/include/util/delay.h ****     millisecond delays directly, using the application-supplied macro
+  81:/usr/avr/include/util/delay.h ****     F_CPU as the CPU clock frequency (in Hertz).
+  82:/usr/avr/include/util/delay.h **** 
+  83:/usr/avr/include/util/delay.h **** */
+  84:/usr/avr/include/util/delay.h **** 
+  85:/usr/avr/include/util/delay.h **** #if !defined(__DOXYGEN__)
+  86:/usr/avr/include/util/delay.h **** static __inline__ void _delay_us(double __us) __attribute__((__always_inline__));
+  87:/usr/avr/include/util/delay.h **** static __inline__ void _delay_ms(double __ms) __attribute__((__always_inline__));
+  88:/usr/avr/include/util/delay.h **** #endif
+  89:/usr/avr/include/util/delay.h **** 
+  90:/usr/avr/include/util/delay.h **** #ifndef F_CPU
+  91:/usr/avr/include/util/delay.h **** /* prevent compiler error by supplying a default */
+  92:/usr/avr/include/util/delay.h **** # warning "F_CPU not defined for <util/delay.h>"
+  93:/usr/avr/include/util/delay.h **** /** \ingroup util_delay
+  94:/usr/avr/include/util/delay.h ****     \def F_CPU
+  95:/usr/avr/include/util/delay.h ****     \brief CPU frequency in Hz
+  96:/usr/avr/include/util/delay.h **** 
+  97:/usr/avr/include/util/delay.h ****     The macro F_CPU specifies the CPU frequency to be considered by
+  98:/usr/avr/include/util/delay.h ****     the delay macros.  This macro is normally supplied by the
+  99:/usr/avr/include/util/delay.h ****     environment (e.g. from within a project header, or the project's
+ 100:/usr/avr/include/util/delay.h ****     Makefile).  The value 1 MHz here is only provided as a "vanilla"
+ 101:/usr/avr/include/util/delay.h ****     fallback if no such user-provided definition could be found.
+ 102:/usr/avr/include/util/delay.h **** 
+ 103:/usr/avr/include/util/delay.h ****     In terms of the delay functions, the CPU frequency can be given as
+ 104:/usr/avr/include/util/delay.h ****     a floating-point constant (e.g. 3.6864E6 for 3.6864 MHz).
+ 105:/usr/avr/include/util/delay.h ****     However, the macros in <util/setbaud.h> require it to be an
+ 106:/usr/avr/include/util/delay.h ****     integer value.
+ 107:/usr/avr/include/util/delay.h ****  */
+ 108:/usr/avr/include/util/delay.h **** # define F_CPU 1000000UL
+ 109:/usr/avr/include/util/delay.h **** #endif
+ 110:/usr/avr/include/util/delay.h **** 
+ 111:/usr/avr/include/util/delay.h **** #ifndef __OPTIMIZE__
+ 112:/usr/avr/include/util/delay.h **** # warning "Compiler optimizations disabled; functions from <util/delay.h> won't work as designed"
+ 113:/usr/avr/include/util/delay.h **** #endif
+ 114:/usr/avr/include/util/delay.h **** 
+ 115:/usr/avr/include/util/delay.h **** #if __HAS_DELAY_CYCLES && defined(__OPTIMIZE__) && \
+ 116:/usr/avr/include/util/delay.h ****   !defined(__DELAY_BACKWARD_COMPATIBLE__) &&	   \
+ 117:/usr/avr/include/util/delay.h ****   __STDC_HOSTED__
+ 118:/usr/avr/include/util/delay.h **** #  include <math.h>
+ 119:/usr/avr/include/util/delay.h **** #endif
+ 120:/usr/avr/include/util/delay.h **** 
+ 121:/usr/avr/include/util/delay.h **** /**
+ 122:/usr/avr/include/util/delay.h ****    \ingroup util_delay
+ 123:/usr/avr/include/util/delay.h **** 
+ 124:/usr/avr/include/util/delay.h ****    Perform a delay of \c __ms milliseconds, using _delay_loop_2().
+ 125:/usr/avr/include/util/delay.h **** 
+ 126:/usr/avr/include/util/delay.h ****    The macro F_CPU is supposed to be defined to a
+ 127:/usr/avr/include/util/delay.h ****    constant defining the CPU clock frequency (in Hertz).
+ 128:/usr/avr/include/util/delay.h **** 
+ 129:/usr/avr/include/util/delay.h ****    The maximal possible delay is 262.14 ms / F_CPU in MHz.
+ 130:/usr/avr/include/util/delay.h **** 
+ 131:/usr/avr/include/util/delay.h ****    When the user request delay which exceed the maximum possible one,
+ 132:/usr/avr/include/util/delay.h ****    _delay_ms() provides a decreased resolution functionality. In this
+ 133:/usr/avr/include/util/delay.h ****    mode _delay_ms() will work with a resolution of 1/10 ms, providing
+ 134:/usr/avr/include/util/delay.h ****    delays up to 6.5535 seconds (independent from CPU frequency).  The
+ 135:/usr/avr/include/util/delay.h ****    user will not be informed about decreased resolution.
+ 136:/usr/avr/include/util/delay.h **** 
+ 137:/usr/avr/include/util/delay.h ****    If the avr-gcc toolchain has __builtin_avr_delay_cycles()
+ 138:/usr/avr/include/util/delay.h ****    support, maximal possible delay is 4294967.295 ms/ F_CPU in MHz. For
+ 139:/usr/avr/include/util/delay.h ****    values greater than the maximal possible delay, overflows results in
+ 140:/usr/avr/include/util/delay.h ****    no delay i.e., 0ms.
+ 141:/usr/avr/include/util/delay.h **** 
+ 142:/usr/avr/include/util/delay.h ****    Conversion of \c __ms into clock cycles may not always result in
+ 143:/usr/avr/include/util/delay.h ****    integer.  By default, the clock cycles rounded up to next
+ 144:/usr/avr/include/util/delay.h ****    integer. This ensures that the user gets at least \c __ms
+ 145:/usr/avr/include/util/delay.h ****    microseconds of delay.
+ 146:/usr/avr/include/util/delay.h **** 
+ 147:/usr/avr/include/util/delay.h ****    Alternatively, by defining the macro \c __DELAY_ROUND_DOWN__, or
+ 148:/usr/avr/include/util/delay.h ****    \c __DELAY_ROUND_CLOSEST__, before including this header file, the
+ 149:/usr/avr/include/util/delay.h ****    algorithm can be made to round down, or round to closest integer,
+ 150:/usr/avr/include/util/delay.h ****    respectively.
+ 151:/usr/avr/include/util/delay.h **** 
+ 152:/usr/avr/include/util/delay.h ****    \note
+ 153:/usr/avr/include/util/delay.h **** 
+ 154:/usr/avr/include/util/delay.h ****    The implementation of _delay_ms() based on
+ 155:/usr/avr/include/util/delay.h ****    __builtin_avr_delay_cycles() is not backward compatible with older
+ 156:/usr/avr/include/util/delay.h ****    implementations.  In order to get functionality backward compatible
+ 157:/usr/avr/include/util/delay.h ****    with previous versions, the macro \c "__DELAY_BACKWARD_COMPATIBLE__"
+ 158:/usr/avr/include/util/delay.h ****    must be defined before including this header file. Also, the
+ 159:/usr/avr/include/util/delay.h ****    backward compatible algorithm will be chosen if the code is
+ 160:/usr/avr/include/util/delay.h ****    compiled in a <em>freestanding environment</em> (GCC option
+ 161:/usr/avr/include/util/delay.h ****    \c -ffreestanding), as the math functions required for rounding are
+ 162:/usr/avr/include/util/delay.h ****    not available to the compiler then.
+ 163:/usr/avr/include/util/delay.h **** 
+ 164:/usr/avr/include/util/delay.h ****  */
+ 165:/usr/avr/include/util/delay.h **** void
+ 166:/usr/avr/include/util/delay.h **** _delay_ms(double __ms)
+ 516               		.loc 2 166 1 view .LVU137
+ 517               	.LBB5:
+ 167:/usr/avr/include/util/delay.h **** {
+ 168:/usr/avr/include/util/delay.h **** 	double __tmp ;
+ 518               		.loc 2 168 2 view .LVU138
+ 169:/usr/avr/include/util/delay.h **** #if __HAS_DELAY_CYCLES && defined(__OPTIMIZE__) && \
+ 170:/usr/avr/include/util/delay.h ****   !defined(__DELAY_BACKWARD_COMPATIBLE__) &&	   \
+ 171:/usr/avr/include/util/delay.h ****   __STDC_HOSTED__
+ 172:/usr/avr/include/util/delay.h **** 	uint32_t __ticks_dc;
+ 519               		.loc 2 172 2 view .LVU139
+ 173:/usr/avr/include/util/delay.h **** 	extern void __builtin_avr_delay_cycles(unsigned long);
+ 520               		.loc 2 173 2 view .LVU140
+ 174:/usr/avr/include/util/delay.h **** 	__tmp = ((F_CPU) / 1e3) * __ms;
+ 521               		.loc 2 174 2 view .LVU141
+ 175:/usr/avr/include/util/delay.h **** 
+ 176:/usr/avr/include/util/delay.h **** 	#if defined(__DELAY_ROUND_DOWN__)
+ 177:/usr/avr/include/util/delay.h **** 		__ticks_dc = (uint32_t)fabs(__tmp);
+ 178:/usr/avr/include/util/delay.h **** 
+ 179:/usr/avr/include/util/delay.h **** 	#elif defined(__DELAY_ROUND_CLOSEST__)
+ 180:/usr/avr/include/util/delay.h **** 		__ticks_dc = (uint32_t)(fabs(__tmp)+0.5);
+ 181:/usr/avr/include/util/delay.h **** 
+ 182:/usr/avr/include/util/delay.h **** 	#else
+ 183:/usr/avr/include/util/delay.h **** 		//round up by default
+ 184:/usr/avr/include/util/delay.h **** 		__ticks_dc = (uint32_t)(ceil(fabs(__tmp)));
+ 522               		.loc 2 184 3 view .LVU142
+ 185:/usr/avr/include/util/delay.h **** 	#endif
+ 186:/usr/avr/include/util/delay.h **** 
+ 187:/usr/avr/include/util/delay.h **** 	__builtin_avr_delay_cycles(__ticks_dc);
+ 523               		.loc 2 187 2 view .LVU143
+ 524 01fa 2FEF      		ldi r18,lo8(63999)
+ 525 01fc 89EF      		ldi r24,hi8(63999)
+ 526 01fe 90E0      		ldi r25,hlo8(63999)
+ 527 0200 2150      	1:	subi r18,1
+ 528 0202 8040      		sbci r24,0
+ 529 0204 9040      		sbci r25,0
+ 530 0206 01F4      		brne 1b
+ 531 0208 00C0      		rjmp .
+ 532 020a 0000      		nop
+ 533               	.LVL52:
+ 534               		.loc 2 187 2 is_stmt 0 view .LVU144
+ 535               	.LBE5:
+ 536               	.LBE4:
+ 222:sd.c          **** }
+ 537               		.loc 1 222 2 is_stmt 1 view .LVU145
+ 222:sd.c          **** }
+ 538               		.loc 1 222 9 is_stmt 0 view .LVU146
+ 539 020c C0E0      		ldi r28,0
+ 540 020e 00C0      		rjmp .L15
+ 541               		.cfi_endproc
+ 542               	.LFE8:
+ 544               	.global	sd_read
+ 546               	sd_read:
+ 547               	.LVL53:
+ 548               	.LFB9:
+ 224:sd.c          **** 
+ 225:sd.c          **** #if defined(SD_EN_INFO) && SD_EN_INFO
+ 226:sd.c          **** uint8_t sd_get_info(sd_info *info)
+ 227:sd.c          **** {
+ 228:sd.c          **** 	uint8_t i, b, csd_read_bl_len, csd_c_size_mult, csd_structure;
+ 229:sd.c          **** 	uint16_t csd_c_size;
+ 230:sd.c          **** 	memset(info, 0, sizeof(*info));
+ 231:sd.c          **** 	SELECT();
+ 232:sd.c          **** 
+ 233:sd.c          **** 	/* Read CID register */
+ 234:sd.c          **** 	if(_command(CMD_SEND_CID, 0))
+ 235:sd.c          **** 	{
+ 236:sd.c          **** 		DESELECT();
+ 237:sd.c          **** 		return 0;
+ 238:sd.c          **** 	}
+ 239:sd.c          **** 
+ 240:sd.c          **** 	while(_spi_xchg(0xFF) != 0xFE) ;
+ 241:sd.c          **** 
+ 242:sd.c          **** 	for(i = 0; i < 18; ++i)
+ 243:sd.c          **** 	{
+ 244:sd.c          **** 		b = _spi_xchg(0xFF);
+ 245:sd.c          **** 		switch(i)
+ 246:sd.c          **** 		{
+ 247:sd.c          **** 		case 0:
+ 248:sd.c          **** 		{
+ 249:sd.c          **** 			info->manufacturer = b;
+ 250:sd.c          **** 			break;
+ 251:sd.c          **** 		}
+ 252:sd.c          **** 
+ 253:sd.c          **** 		case 1:
+ 254:sd.c          **** 		case 2:
+ 255:sd.c          **** 		{
+ 256:sd.c          **** 			info->oem[i - 1] = b;
+ 257:sd.c          **** 			break;
+ 258:sd.c          **** 		}
+ 259:sd.c          **** 
+ 260:sd.c          **** 		case 3:
+ 261:sd.c          **** 		case 4:
+ 262:sd.c          **** 		case 5:
+ 263:sd.c          **** 		case 6:
+ 264:sd.c          **** 		case 7:
+ 265:sd.c          **** 		{
+ 266:sd.c          **** 			info->product[i - 3] = b;
+ 267:sd.c          **** 			break;
+ 268:sd.c          **** 		}
+ 269:sd.c          **** 
+ 270:sd.c          **** 		case 8:
+ 271:sd.c          **** 		{
+ 272:sd.c          **** 			info->revision = b;
+ 273:sd.c          **** 			break;
+ 274:sd.c          **** 		}
+ 275:sd.c          **** 
+ 276:sd.c          **** 		case 9:
+ 277:sd.c          **** 		case 10:
+ 278:sd.c          **** 		case 11:
+ 279:sd.c          **** 		case 12:
+ 280:sd.c          **** 		{
+ 281:sd.c          **** 			info->serial |= (uint32_t) b << ((12 - i) * 8);
+ 282:sd.c          **** 			break;
+ 283:sd.c          **** 		}
+ 284:sd.c          **** 
+ 285:sd.c          **** 		case 13:
+ 286:sd.c          **** 		{
+ 287:sd.c          **** 			info->manufacturing_year = b << 4;
+ 288:sd.c          **** 			break;
+ 289:sd.c          **** 		}
+ 290:sd.c          **** 
+ 291:sd.c          **** 		case 14:
+ 292:sd.c          **** 		{
+ 293:sd.c          **** 			info->manufacturing_year |= b >> 4;
+ 294:sd.c          **** 			info->manufacturing_month = b & 0x0f;
+ 295:sd.c          **** 			break;
+ 296:sd.c          **** 		}
+ 297:sd.c          **** 		}
+ 298:sd.c          **** 	}
+ 299:sd.c          **** 
+ 300:sd.c          **** 	/* Read CSD register */
+ 301:sd.c          **** 	csd_read_bl_len = 0;
+ 302:sd.c          **** 	csd_c_size_mult = 0;
+ 303:sd.c          **** 	csd_structure = 0;
+ 304:sd.c          **** 	csd_c_size = 0;
+ 305:sd.c          **** 
+ 306:sd.c          **** 	if(_command(CMD_SEND_CSD, 0))
+ 307:sd.c          **** 	{
+ 308:sd.c          **** 		DESELECT();
+ 309:sd.c          **** 		return 0;
+ 310:sd.c          **** 	}
+ 311:sd.c          **** 
+ 312:sd.c          **** 	while(_spi_xchg(0xFF) != 0xFE) ;
+ 313:sd.c          **** 
+ 314:sd.c          **** 	for(i = 0; i < 18; ++i)
+ 315:sd.c          **** 	{
+ 316:sd.c          **** 		b = _spi_xchg(0xFF);
+ 317:sd.c          **** 		if(i == 0)
+ 318:sd.c          **** 		{
+ 319:sd.c          **** 			csd_structure = b >> 6;
+ 320:sd.c          **** 		}
+ 321:sd.c          **** 		else if(i == 14)
+ 322:sd.c          **** 		{
+ 323:sd.c          **** 			if(b & 0x40)
+ 324:sd.c          **** 			{
+ 325:sd.c          **** 				info->flag_copy = 1;
+ 326:sd.c          **** 			}
+ 327:sd.c          **** 
+ 328:sd.c          **** 			if(b & 0x20)
+ 329:sd.c          **** 			{
+ 330:sd.c          **** 				info->flag_write_protect = 1;
+ 331:sd.c          **** 			}
+ 332:sd.c          **** 
+ 333:sd.c          **** 			if(b & 0x10)
+ 334:sd.c          **** 			{
+ 335:sd.c          **** 				info->flag_write_protect_temp = 1;
+ 336:sd.c          **** 			}
+ 337:sd.c          **** 
+ 338:sd.c          **** 			info->format = (b & 0x0C) >> 2;
+ 339:sd.c          **** 		}
+ 340:sd.c          **** 		else
+ 341:sd.c          **** 		{
+ 342:sd.c          **** 			if(csd_structure == 0x01)
+ 343:sd.c          **** 			{
+ 344:sd.c          **** 				switch(i)
+ 345:sd.c          **** 				{
+ 346:sd.c          **** 				case 7:
+ 347:sd.c          **** 				{
+ 348:sd.c          **** 					b &= 0x3f;
+ 349:sd.c          **** 				}
+ 350:sd.c          **** 
+ 351:sd.c          **** 				case 8:
+ 352:sd.c          **** 				case 9:
+ 353:sd.c          **** 				{
+ 354:sd.c          **** 					csd_c_size <<= 8;
+ 355:sd.c          **** 					csd_c_size |= b;
+ 356:sd.c          **** 					++csd_c_size;
+ 357:sd.c          **** 					info->capacity = (uint32_t)csd_c_size << 10;
+ 358:sd.c          **** 				}
+ 359:sd.c          **** 				}
+ 360:sd.c          **** 			}
+ 361:sd.c          **** 			else if(csd_structure == 0x00)
+ 362:sd.c          **** 			{
+ 363:sd.c          **** 				switch (i)
+ 364:sd.c          **** 				{
+ 365:sd.c          **** 				case 5:
+ 366:sd.c          **** 				{
+ 367:sd.c          **** 					csd_read_bl_len = b & 0x0F;
+ 368:sd.c          **** 					break;
+ 369:sd.c          **** 				}
+ 370:sd.c          **** 
+ 371:sd.c          **** 				case 6:
+ 372:sd.c          **** 				{
+ 373:sd.c          **** 					csd_c_size = b & 0x03;
+ 374:sd.c          **** 					csd_c_size <<= 8;
+ 375:sd.c          **** 					break;
+ 376:sd.c          **** 				}
+ 377:sd.c          **** 
+ 378:sd.c          **** 				case 7:
+ 379:sd.c          **** 				{
+ 380:sd.c          **** 					csd_c_size |= b;
+ 381:sd.c          **** 					csd_c_size <<= 2;
+ 382:sd.c          **** 					break;
+ 383:sd.c          **** 				}
+ 384:sd.c          **** 
+ 385:sd.c          **** 				case 8:
+ 386:sd.c          **** 				{
+ 387:sd.c          **** 					csd_c_size |= b >> 6;
+ 388:sd.c          **** 					++csd_c_size;
+ 389:sd.c          **** 					break;
+ 390:sd.c          **** 				}
+ 391:sd.c          **** 
+ 392:sd.c          **** 				case 9:
+ 393:sd.c          **** 				{
+ 394:sd.c          **** 					csd_c_size_mult = b & 0x03;
+ 395:sd.c          **** 					csd_c_size_mult <<= 1;
+ 396:sd.c          **** 					break;
+ 397:sd.c          **** 				}
+ 398:sd.c          **** 
+ 399:sd.c          **** 				case 10:
+ 400:sd.c          **** 				{
+ 401:sd.c          **** 					csd_c_size_mult |= b >> 7;
+ 402:sd.c          **** 					info->capacity = ((uint32_t)csd_c_size <<
+ 403:sd.c          **** 						(csd_c_size_mult + csd_read_bl_len + 2)) >> 9;
+ 404:sd.c          **** 					break;
+ 405:sd.c          **** 				}
+ 406:sd.c          **** 				}
+ 407:sd.c          **** 			}
+ 408:sd.c          **** 		}
+ 409:sd.c          **** 	}
+ 410:sd.c          **** 
+ 411:sd.c          **** 	DESELECT();
+ 412:sd.c          **** 	return 1;
+ 413:sd.c          **** }
+ 414:sd.c          **** #endif /* SD_EN_INFO */
+ 415:sd.c          **** 
+ 416:sd.c          **** #if defined(SD_EN_READ) && SD_EN_READ
+ 417:sd.c          **** uint8_t sd_read
+ 418:sd.c          **** 	(uint8_t *buffer, uint32_t block, uint16_t offset, uint16_t count)
+ 419:sd.c          **** {
+ 549               		.loc 1 419 1 is_stmt 1 view -0
+ 550               		.cfi_startproc
+ 551               		.loc 1 419 1 is_stmt 0 view .LVU148
+ 552 0210 7F92      		push r7
+ 553               	.LCFI13:
+ 554               		.cfi_def_cfa_offset 3
+ 555               		.cfi_offset 7, -2
+ 556 0212 8F92      		push r8
+ 557               	.LCFI14:
+ 558               		.cfi_def_cfa_offset 4
+ 559               		.cfi_offset 8, -3
+ 560 0214 9F92      		push r9
+ 561               	.LCFI15:
+ 562               		.cfi_def_cfa_offset 5
+ 563               		.cfi_offset 9, -4
+ 564 0216 AF92      		push r10
+ 565               	.LCFI16:
+ 566               		.cfi_def_cfa_offset 6
+ 567               		.cfi_offset 10, -5
+ 568 0218 BF92      		push r11
+ 569               	.LCFI17:
+ 570               		.cfi_def_cfa_offset 7
+ 571               		.cfi_offset 11, -6
+ 572 021a CF92      		push r12
+ 573               	.LCFI18:
+ 574               		.cfi_def_cfa_offset 8
+ 575               		.cfi_offset 12, -7
+ 576 021c DF92      		push r13
+ 577               	.LCFI19:
+ 578               		.cfi_def_cfa_offset 9
+ 579               		.cfi_offset 13, -8
+ 580 021e EF92      		push r14
+ 581               	.LCFI20:
+ 582               		.cfi_def_cfa_offset 10
+ 583               		.cfi_offset 14, -9
+ 584 0220 FF92      		push r15
+ 585               	.LCFI21:
+ 586               		.cfi_def_cfa_offset 11
+ 587               		.cfi_offset 15, -10
+ 588 0222 0F93      		push r16
+ 589               	.LCFI22:
+ 590               		.cfi_def_cfa_offset 12
+ 591               		.cfi_offset 16, -11
+ 592 0224 1F93      		push r17
+ 593               	.LCFI23:
+ 594               		.cfi_def_cfa_offset 13
+ 595               		.cfi_offset 17, -12
+ 596 0226 CF93      		push r28
+ 597               	.LCFI24:
+ 598               		.cfi_def_cfa_offset 14
+ 599               		.cfi_offset 28, -13
+ 600 0228 DF93      		push r29
+ 601               	.LCFI25:
+ 602               		.cfi_def_cfa_offset 15
+ 603               		.cfi_offset 29, -14
+ 604               	/* prologue: function */
+ 605               	/* frame size = 0 */
+ 606               	/* stack size = 13 */
+ 607               	.L__stack_usage = 13
+ 608 022a D82E      		mov r13,r24
+ 609 022c C92E      		mov r12,r25
+ 610 022e 7901      		movw r14,r18
+ 611 0230 E801      		movw r28,r16
+ 420:sd.c          **** 	uint16_t i;
+ 612               		.loc 1 420 2 is_stmt 1 view .LVU149
+ 421:sd.c          **** 	SELECT();
+ 613               		.loc 1 421 2 view .LVU150
+ 614 0232 2A98      		cbi 0x5,2
+ 422:sd.c          **** 	if(_command(CMD_READ_SINGLE_BLOCK,
+ 615               		.loc 1 422 2 view .LVU151
+ 616               		.loc 1 422 5 is_stmt 0 view .LVU152
+ 617 0234 8091 0000 		lds r24,_card_type
+ 618               	.LVL54:
+ 619               		.loc 1 422 5 view .LVU153
+ 620 0238 82FD      		sbrc r24,2
+ 621 023a 00C0      		rjmp .L46
+ 622               		.loc 1 422 5 discriminator 1 view .LVU154
+ 623 023c 89E0      		ldi r24,9
+ 624               		1:
+ 625 023e 7695      		lsr r23
+ 626 0240 6795      		ror r22
+ 627 0242 5795      		ror r21
+ 628 0244 4795      		ror r20
+ 629 0246 8A95      		dec r24
+ 630 0248 01F4      		brne 1b
+ 631               	.LVL55:
+ 632               	.L46:
+ 633               		.loc 1 422 5 discriminator 4 view .LVU155
+ 634 024a 81E1      		ldi r24,lo8(17)
+ 635 024c 0E94 0000 		call _command
+ 636               	.LVL56:
+ 637               		.loc 1 422 5 discriminator 4 view .LVU156
+ 638 0250 782E      		mov r7,r24
+ 423:sd.c          **** 		_card_type & SD_HC ? block : (block >> 9)))
+ 424:sd.c          **** 	{
+ 425:sd.c          **** 		DESELECT();
+ 426:sd.c          **** 		return 1;
+ 427:sd.c          **** 	}
+ 428:sd.c          **** 
+ 429:sd.c          **** 	for(i = 0; ; ++i)
+ 639               		.loc 1 429 8 discriminator 4 view .LVU157
+ 640 0252 10E0      		ldi r17,0
+ 641 0254 00E0      		ldi r16,0
+ 642               	.LVL57:
+ 422:sd.c          **** 	if(_command(CMD_READ_SINGLE_BLOCK,
+ 643               		.loc 1 422 4 discriminator 4 view .LVU158
+ 644 0256 8823      		tst r24
+ 645 0258 01F0      		breq .L47
+ 646               	.L60:
+ 430:sd.c          **** 	{
+ 431:sd.c          **** 		if(_spi_xchg(0xFF) == 0xFE)
+ 432:sd.c          **** 		{
+ 433:sd.c          **** 			break;
+ 434:sd.c          **** 		}
+ 435:sd.c          **** 
+ 436:sd.c          **** 		if(i == 0xFFFF)
+ 437:sd.c          **** 		{
+ 438:sd.c          **** 			DESELECT();
+ 647               		.loc 1 438 4 is_stmt 1 view .LVU159
+ 648 025a 2A9A      		sbi 0x5,2
+ 439:sd.c          **** 			return 1;
+ 649               		.loc 1 439 4 view .LVU160
+ 650               		.loc 1 439 11 is_stmt 0 view .LVU161
+ 651 025c 7724      		clr r7
+ 652 025e 7394      		inc r7
+ 653               	.LVL58:
+ 654               	.L45:
+ 440:sd.c          **** 		}
+ 441:sd.c          **** 	}
+ 442:sd.c          **** 
+ 443:sd.c          **** 	for(i = 0; i < offset; ++i)
+ 444:sd.c          **** 	{
+ 445:sd.c          **** 		_spi_xchg(0xFF);
+ 446:sd.c          **** 	}
+ 447:sd.c          **** 
+ 448:sd.c          **** 	for(; i < offset + count; ++i)
+ 449:sd.c          **** 	{
+ 450:sd.c          **** 		*buffer++ = _spi_xchg(0xFF);
+ 451:sd.c          **** 	}
+ 452:sd.c          **** 
+ 453:sd.c          **** 	for(; i < 512; ++i)
+ 454:sd.c          **** 	{
+ 455:sd.c          **** 		_spi_xchg(0xFF);
+ 456:sd.c          **** 	}
+ 457:sd.c          **** 
+ 458:sd.c          **** 	_spi_xchg(0xFF);
+ 459:sd.c          **** 	_spi_xchg(0xFF);
+ 460:sd.c          **** 	DESELECT();
+ 461:sd.c          **** 	_spi_xchg(0xFF);
+ 462:sd.c          **** 	return 0;
+ 463:sd.c          **** }
+ 655               		.loc 1 463 1 view .LVU162
+ 656 0260 872D      		mov r24,r7
+ 657               	/* epilogue start */
+ 658 0262 DF91      		pop r29
+ 659 0264 CF91      		pop r28
+ 660 0266 1F91      		pop r17
+ 661 0268 0F91      		pop r16
+ 662 026a FF90      		pop r15
+ 663 026c EF90      		pop r14
+ 664               	.LVL59:
+ 665               		.loc 1 463 1 view .LVU163
+ 666 026e DF90      		pop r13
+ 667 0270 CF90      		pop r12
+ 668 0272 BF90      		pop r11
+ 669 0274 AF90      		pop r10
+ 670 0276 9F90      		pop r9
+ 671 0278 8F90      		pop r8
+ 672 027a 7F90      		pop r7
+ 673 027c 0895      		ret
+ 674               	.LVL60:
+ 675               	.L47:
+ 431:sd.c          **** 		{
+ 676               		.loc 1 431 3 is_stmt 1 view .LVU164
+ 431:sd.c          **** 		{
+ 677               		.loc 1 431 6 is_stmt 0 view .LVU165
+ 678 027e 8FEF      		ldi r24,lo8(-1)
+ 679 0280 0E94 0000 		call _spi_xchg
+ 680               	.LVL61:
+ 431:sd.c          **** 		{
+ 681               		.loc 1 431 5 view .LVU166
+ 682 0284 8E3F      		cpi r24,lo8(-2)
+ 683 0286 01F0      		breq .L59
+ 436:sd.c          **** 		{
+ 684               		.loc 1 436 3 is_stmt 1 view .LVU167
+ 436:sd.c          **** 		{
+ 685               		.loc 1 436 5 is_stmt 0 view .LVU168
+ 686 0288 0F3F      		cpi r16,-1
+ 687 028a 1007      		cpc r17,r16
+ 688 028c 01F0      		breq .L60
+ 429:sd.c          **** 	{
+ 689               		.loc 1 429 15 view .LVU169
+ 690 028e 0F5F      		subi r16,-1
+ 691 0290 1F4F      		sbci r17,-1
+ 692               	.LVL62:
+ 431:sd.c          **** 		{
+ 693               		.loc 1 431 5 view .LVU170
+ 694 0292 00C0      		rjmp .L47
+ 695               	.L51:
+ 445:sd.c          **** 	}
+ 696               		.loc 1 445 3 is_stmt 1 discriminator 3 view .LVU171
+ 697 0294 8FEF      		ldi r24,lo8(-1)
+ 698 0296 0E94 0000 		call _spi_xchg
+ 699               	.LVL63:
+ 443:sd.c          **** 	{
+ 700               		.loc 1 443 25 is_stmt 0 discriminator 3 view .LVU172
+ 701 029a 0F5F      		subi r16,-1
+ 702 029c 1F4F      		sbci r17,-1
+ 703               	.LVL64:
+ 704               	.L49:
+ 443:sd.c          **** 	{
+ 705               		.loc 1 443 2 discriminator 1 view .LVU173
+ 706 029e 0E15      		cp r16,r14
+ 707 02a0 1F05      		cpc r17,r15
+ 708 02a2 01F4      		brne .L51
+ 709 02a4 5701      		movw r10,r14
+ 448:sd.c          **** 	{
+ 710               		.loc 1 448 19 view .LVU174
+ 711 02a6 4701      		movw r8,r14
+ 712 02a8 8C0E      		add r8,r28
+ 713 02aa 9D1E      		adc r9,r29
+ 714               	.LVL65:
+ 715               	.L52:
+ 448:sd.c          **** 	{
+ 716               		.loc 1 448 2 discriminator 1 view .LVU175
+ 717 02ac A814      		cp r10,r8
+ 718 02ae B904      		cpc r11,r9
+ 719 02b0 00F0      		brlo .L53
+ 720 02b2 8E14      		cp r8,r14
+ 721 02b4 9F04      		cpc r9,r15
+ 722 02b6 00F4      		brsh .L55
+ 723 02b8 D0E0      		ldi r29,0
+ 724 02ba C0E0      		ldi r28,0
+ 725               	.LVL66:
+ 726               	.L55:
+ 448:sd.c          **** 	{
+ 727               		.loc 1 448 2 discriminator 1 view .LVU176
+ 728 02bc CE0D      		add r28,r14
+ 729 02be DF1D      		adc r29,r15
+ 730               	.LVL67:
+ 731               	.L56:
+ 453:sd.c          **** 	{
+ 732               		.loc 1 453 2 discriminator 1 view .LVU177
+ 733 02c0 C115      		cp r28,__zero_reg__
+ 734 02c2 82E0      		ldi r24,2
+ 735 02c4 D807      		cpc r29,r24
+ 736 02c6 00F0      		brlo .L57
+ 458:sd.c          **** 	_spi_xchg(0xFF);
+ 737               		.loc 1 458 2 is_stmt 1 view .LVU178
+ 738 02c8 8FEF      		ldi r24,lo8(-1)
+ 739 02ca 0E94 0000 		call _spi_xchg
+ 740               	.LVL68:
+ 459:sd.c          **** 	DESELECT();
+ 741               		.loc 1 459 2 view .LVU179
+ 742 02ce 8FEF      		ldi r24,lo8(-1)
+ 743 02d0 0E94 0000 		call _spi_xchg
+ 744               	.LVL69:
+ 460:sd.c          **** 	_spi_xchg(0xFF);
+ 745               		.loc 1 460 2 view .LVU180
+ 746 02d4 2A9A      		sbi 0x5,2
+ 461:sd.c          **** 	return 0;
+ 747               		.loc 1 461 2 view .LVU181
+ 748 02d6 8FEF      		ldi r24,lo8(-1)
+ 749 02d8 0E94 0000 		call _spi_xchg
+ 750               	.LVL70:
+ 462:sd.c          **** }
+ 751               		.loc 1 462 2 view .LVU182
+ 462:sd.c          **** }
+ 752               		.loc 1 462 9 is_stmt 0 view .LVU183
+ 753 02dc 00C0      		rjmp .L45
+ 754               	.LVL71:
+ 755               	.L59:
+ 443:sd.c          **** 	{
+ 756               		.loc 1 443 8 view .LVU184
+ 757 02de 10E0      		ldi r17,0
+ 758 02e0 00E0      		ldi r16,0
+ 759               	.LVL72:
+ 443:sd.c          **** 	{
+ 760               		.loc 1 443 8 view .LVU185
+ 761 02e2 00C0      		rjmp .L49
+ 762               	.LVL73:
+ 763               	.L53:
+ 450:sd.c          **** 	}
+ 764               		.loc 1 450 3 is_stmt 1 discriminator 2 view .LVU186
+ 450:sd.c          **** 	}
+ 765               		.loc 1 450 10 is_stmt 0 discriminator 2 view .LVU187
+ 766 02e4 0D2D      		mov r16,r13
+ 767 02e6 1C2D      		mov r17,r12
+ 768               	.LVL74:
+ 450:sd.c          **** 	}
+ 769               		.loc 1 450 15 discriminator 2 view .LVU188
+ 770 02e8 8FEF      		ldi r24,lo8(-1)
+ 771 02ea 0E94 0000 		call _spi_xchg
+ 772               	.LVL75:
+ 450:sd.c          **** 	}
+ 773               		.loc 1 450 13 discriminator 2 view .LVU189
+ 774 02ee F801      		movw r30,r16
+ 775 02f0 8193      		st Z+,r24
+ 776               	.LVL76:
+ 450:sd.c          **** 	}
+ 777               		.loc 1 450 13 discriminator 2 view .LVU190
+ 778 02f2 8F01      		movw r16,r30
+ 448:sd.c          **** 	{
+ 779               		.loc 1 448 28 discriminator 2 view .LVU191
+ 780 02f4 FFEF      		ldi r31,-1
+ 781 02f6 AF1A      		sub r10,r31
+ 782 02f8 BF0A      		sbc r11,r31
+ 783               	.LVL77:
+ 450:sd.c          **** 	}
+ 784               		.loc 1 450 10 discriminator 2 view .LVU192
+ 785 02fa D02E      		mov r13,r16
+ 786 02fc C12E      		mov r12,r17
+ 787 02fe 00C0      		rjmp .L52
+ 788               	.LVL78:
+ 789               	.L57:
+ 455:sd.c          **** 	}
+ 790               		.loc 1 455 3 is_stmt 1 discriminator 2 view .LVU193
+ 791 0300 8FEF      		ldi r24,lo8(-1)
+ 792 0302 0E94 0000 		call _spi_xchg
+ 793               	.LVL79:
+ 453:sd.c          **** 	{
+ 794               		.loc 1 453 17 is_stmt 0 discriminator 2 view .LVU194
+ 795 0306 2196      		adiw r28,1
+ 796               	.LVL80:
+ 453:sd.c          **** 	{
+ 797               		.loc 1 453 17 discriminator 2 view .LVU195
+ 798 0308 00C0      		rjmp .L56
+ 799               		.cfi_endproc
+ 800               	.LFE9:
+ 802               		.local	_card_type
+ 803               		.comm	_card_type,1,1
+ 804               	.Letext0:
+ 805               		.file 3 "/usr/avr/include/stdint.h"
+DEFINED SYMBOLS
+                            *ABS*:0000000000000000 sd.c
+     /tmp/ccHRUVJY.s:2      *ABS*:000000000000003e __SP_H__
+     /tmp/ccHRUVJY.s:3      *ABS*:000000000000003d __SP_L__
+     /tmp/ccHRUVJY.s:4      *ABS*:000000000000003f __SREG__
+     /tmp/ccHRUVJY.s:5      *ABS*:0000000000000000 __tmp_reg__
+     /tmp/ccHRUVJY.s:6      *ABS*:0000000000000001 __zero_reg__
+     /tmp/ccHRUVJY.s:11     .text:0000000000000000 _spi_xchg
+     /tmp/ccHRUVJY.s:49     .text:0000000000000012 _command
+     /tmp/ccHRUVJY.s:163    .text:000000000000007a sd_init
+                             .bss:0000000000000000 _card_type
+     /tmp/ccHRUVJY.s:546    .text:0000000000000210 sd_read
+
+UNDEFINED SYMBOLS
+__do_clear_bss

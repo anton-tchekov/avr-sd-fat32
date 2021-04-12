@@ -1,0 +1,395 @@
+   1               		.file	"util.c"
+   2               	__SP_H__ = 0x3e
+   3               	__SP_L__ = 0x3d
+   4               	__SREG__ = 0x3f
+   5               	__tmp_reg__ = 0
+   6               	__zero_reg__ = 1
+   7               		.text
+   8               	.Ltext0:
+   9               		.cfi_sections	.debug_frame
+  10               	.global	ld_u32
+  12               	ld_u32:
+  13               	.LVL0:
+  14               	.LFB0:
+  15               		.file 1 "util.c"
+   1:util.c        **** #include "util.h"
+   2:util.c        **** 
+   3:util.c        **** uint32_t ld_u32(const uint8_t *p)
+   4:util.c        **** {
+  16               		.loc 1 4 1 view -0
+  17               		.cfi_startproc
+  18               		.loc 1 4 1 is_stmt 0 view .LVU1
+  19 0000 CF93      		push r28
+  20               	.LCFI0:
+  21               		.cfi_def_cfa_offset 3
+  22               		.cfi_offset 28, -2
+  23 0002 DF93      		push r29
+  24               	.LCFI1:
+  25               		.cfi_def_cfa_offset 4
+  26               		.cfi_offset 29, -3
+  27 0004 00D0      		rcall .
+  28 0006 00D0      		rcall .
+  29               	.LCFI2:
+  30               		.cfi_def_cfa_offset 8
+  31 0008 CDB7      		in r28,__SP_L__
+  32 000a DEB7      		in r29,__SP_H__
+  33               	.LCFI3:
+  34               		.cfi_def_cfa_register 28
+  35               	/* prologue: function */
+  36               	/* frame size = 4 */
+  37               	/* stack size = 6 */
+  38               	.L__stack_usage = 6
+   5:util.c        **** 	return ((uint32_t)p[0]) | (((uint32_t)p[1]) << 8) |
+  39               		.loc 1 5 2 is_stmt 1 view .LVU2
+   6:util.c        **** 		(((uint32_t)p[2]) << 16) | (((uint32_t)p[3]) << 24);
+  40               		.loc 1 6 28 is_stmt 0 view .LVU3
+  41 000c FC01      		movw r30,r24
+  42 000e 2081      		ld r18,Z
+  43 0010 3181      		ldd r19,Z+1
+  44 0012 4281      		ldd r20,Z+2
+  45 0014 5381      		ldd r21,Z+3
+   7:util.c        **** }
+  46               		.loc 1 7 1 view .LVU4
+  47 0016 CA01      		movw r24,r20
+  48               	.LVL1:
+  49               		.loc 1 7 1 view .LVU5
+  50 0018 B901      		movw r22,r18
+  51               	/* epilogue start */
+  52 001a 0F90      		pop __tmp_reg__
+  53 001c 0F90      		pop __tmp_reg__
+  54 001e 0F90      		pop __tmp_reg__
+  55 0020 0F90      		pop __tmp_reg__
+  56 0022 DF91      		pop r29
+  57 0024 CF91      		pop r28
+  58 0026 0895      		ret
+  59               		.cfi_endproc
+  60               	.LFE0:
+  62               	.global	ld_u16
+  64               	ld_u16:
+  65               	.LVL2:
+  66               	.LFB1:
+   8:util.c        **** 
+   9:util.c        **** uint16_t ld_u16(const uint8_t *p)
+  10:util.c        **** {
+  67               		.loc 1 10 1 is_stmt 1 view -0
+  68               		.cfi_startproc
+  69               	/* prologue: function */
+  70               	/* frame size = 0 */
+  71               	/* stack size = 0 */
+  72               	.L__stack_usage = 0
+  11:util.c        **** 	return ((uint16_t)p[0]) | ((uint16_t)(p[1]) << 8);
+  73               		.loc 1 11 2 view .LVU7
+  12:util.c        **** }
+  74               		.loc 1 12 1 is_stmt 0 view .LVU8
+  75 0028 FC01      		movw r30,r24
+  76 002a 8081      		ld r24,Z
+  77 002c 9181      		ldd r25,Z+1
+  78               	.LVL3:
+  79               	/* epilogue start */
+  80               		.loc 1 12 1 view .LVU9
+  81 002e 0895      		ret
+  82               		.cfi_endproc
+  83               	.LFE1:
+  85               	.global	mem_set
+  87               	mem_set:
+  88               	.LVL4:
+  89               	.LFB2:
+  13:util.c        **** 
+  14:util.c        **** void mem_set(uint8_t *dst, uint8_t val, uint16_t cnt)
+  15:util.c        **** {
+  90               		.loc 1 15 1 is_stmt 1 view -0
+  91               		.cfi_startproc
+  92               	/* prologue: function */
+  93               	/* frame size = 0 */
+  94               	/* stack size = 0 */
+  95               	.L__stack_usage = 0
+  96               		.loc 1 15 1 is_stmt 0 view .LVU11
+  97 0030 9C01      		movw r18,r24
+  16:util.c        **** 	while(cnt--)
+  98               		.loc 1 16 2 is_stmt 1 view .LVU12
+  99 0032 480F      		add r20,r24
+ 100 0034 591F      		adc r21,r25
+ 101               	.LVL5:
+ 102               	.L4:
+ 103               		.loc 1 16 7 is_stmt 0 view .LVU13
+ 104 0036 2417      		cp r18,r20
+ 105 0038 3507      		cpc r19,r21
+ 106 003a 01F4      		brne .L5
+ 107               	/* epilogue start */
+  17:util.c        **** 	{
+  18:util.c        **** 		*dst++ = val;
+  19:util.c        **** 	}
+  20:util.c        **** }
+ 108               		.loc 1 20 1 view .LVU14
+ 109 003c 0895      		ret
+ 110               	.L5:
+  18:util.c        **** 	}
+ 111               		.loc 1 18 3 is_stmt 1 view .LVU15
+ 112               	.LVL6:
+  18:util.c        **** 	}
+ 113               		.loc 1 18 10 is_stmt 0 view .LVU16
+ 114 003e F901      		movw r30,r18
+ 115 0040 6193      		st Z+,r22
+ 116               	.LVL7:
+  18:util.c        **** 	}
+ 117               		.loc 1 18 10 view .LVU17
+ 118 0042 9F01      		movw r18,r30
+ 119 0044 00C0      		rjmp .L4
+ 120               		.cfi_endproc
+ 121               	.LFE2:
+ 123               	.global	mem_cmp
+ 125               	mem_cmp:
+ 126               	.LVL8:
+ 127               	.LFB3:
+  21:util.c        **** 
+  22:util.c        **** uint8_t mem_cmp(const uint8_t *dst, const uint8_t *src, uint16_t cnt)
+  23:util.c        **** {
+ 128               		.loc 1 23 1 is_stmt 1 view -0
+ 129               		.cfi_startproc
+ 130               	/* prologue: function */
+ 131               	/* frame size = 0 */
+ 132               	/* stack size = 0 */
+ 133               	.L__stack_usage = 0
+ 134               		.loc 1 23 1 is_stmt 0 view .LVU19
+ 135 0046 9C01      		movw r18,r24
+  24:util.c        **** 	uint8_t r = 0;
+ 136               		.loc 1 24 2 is_stmt 1 view .LVU20
+ 137               	.LVL9:
+  25:util.c        **** 	while(cnt-- && (r = *dst++ == *src++)) ;
+ 138               		.loc 1 25 2 view .LVU21
+ 139 0048 480F      		add r20,r24
+ 140 004a 591F      		adc r21,r25
+ 141               	.LVL10:
+  24:util.c        **** 	uint8_t r = 0;
+ 142               		.loc 1 24 10 is_stmt 0 view .LVU22
+ 143 004c 80E0      		ldi r24,0
+ 144               	.LVL11:
+ 145               	.L8:
+ 146               		.loc 1 25 41 is_stmt 1 discriminator 2 view .LVU23
+ 147               		.loc 1 25 7 is_stmt 0 discriminator 2 view .LVU24
+ 148 004e 2417      		cp r18,r20
+ 149 0050 3507      		cpc r19,r21
+ 150 0052 01F0      		breq .L6
+ 151               	.LVL12:
+ 152               		.loc 1 25 36 discriminator 1 view .LVU25
+ 153 0054 FB01      		movw r30,r22
+ 154               	.LVL13:
+ 155               		.loc 1 25 20 discriminator 1 view .LVU26
+ 156 0056 81E0      		ldi r24,lo8(1)
+ 157               		.loc 1 25 14 discriminator 1 view .LVU27
+ 158 0058 D901      		movw r26,r18
+ 159 005a 6D91      		ld r22,X+
+ 160               	.LVL14:
+ 161               		.loc 1 25 14 discriminator 1 view .LVU28
+ 162 005c 9D01      		movw r18,r26
+ 163               	.LVL15:
+ 164               		.loc 1 25 14 discriminator 1 view .LVU29
+ 165 005e 9191      		ld r25,Z+
+ 166               	.LVL16:
+ 167               		.loc 1 25 14 discriminator 1 view .LVU30
+ 168 0060 6917      		cp r22,r25
+ 169 0062 01F0      		breq .L9
+ 170               		.loc 1 25 20 view .LVU31
+ 171 0064 80E0      		ldi r24,0
+ 172               	.LVL17:
+  26:util.c        **** 	return r;
+ 173               		.loc 1 26 2 is_stmt 1 view .LVU32
+ 174               	.L6:
+ 175               	/* epilogue start */
+  27:util.c        **** }
+ 176               		.loc 1 27 1 is_stmt 0 view .LVU33
+ 177 0066 0895      		ret
+ 178               	.LVL18:
+ 179               	.L9:
+  25:util.c        **** 	while(cnt-- && (r = *dst++ == *src++)) ;
+ 180               		.loc 1 25 36 view .LVU34
+ 181 0068 BF01      		movw r22,r30
+ 182               	.LVL19:
+  25:util.c        **** 	while(cnt-- && (r = *dst++ == *src++)) ;
+ 183               		.loc 1 25 36 view .LVU35
+ 184 006a 00C0      		rjmp .L8
+ 185               		.cfi_endproc
+ 186               	.LFE3:
+ 188               	.global	mem_mem
+ 190               	mem_mem:
+ 191               	.LVL20:
+ 192               	.LFB4:
+  28:util.c        **** 
+  29:util.c        **** const uint8_t *mem_mem(
+  30:util.c        **** 	const uint8_t *haystack, uint16_t haystack_len,
+  31:util.c        **** 	const uint8_t *needle, uint16_t needle_len)
+  32:util.c        **** {
+ 193               		.loc 1 32 1 is_stmt 1 view -0
+ 194               		.cfi_startproc
+ 195               		.loc 1 32 1 is_stmt 0 view .LVU37
+ 196 006c 8F92      		push r8
+ 197               	.LCFI4:
+ 198               		.cfi_def_cfa_offset 3
+ 199               		.cfi_offset 8, -2
+ 200 006e 9F92      		push r9
+ 201               	.LCFI5:
+ 202               		.cfi_def_cfa_offset 4
+ 203               		.cfi_offset 9, -3
+ 204 0070 AF92      		push r10
+ 205               	.LCFI6:
+ 206               		.cfi_def_cfa_offset 5
+ 207               		.cfi_offset 10, -4
+ 208 0072 BF92      		push r11
+ 209               	.LCFI7:
+ 210               		.cfi_def_cfa_offset 6
+ 211               		.cfi_offset 11, -5
+ 212 0074 CF92      		push r12
+ 213               	.LCFI8:
+ 214               		.cfi_def_cfa_offset 7
+ 215               		.cfi_offset 12, -6
+ 216 0076 DF92      		push r13
+ 217               	.LCFI9:
+ 218               		.cfi_def_cfa_offset 8
+ 219               		.cfi_offset 13, -7
+ 220 0078 EF92      		push r14
+ 221               	.LCFI10:
+ 222               		.cfi_def_cfa_offset 9
+ 223               		.cfi_offset 14, -8
+ 224 007a FF92      		push r15
+ 225               	.LCFI11:
+ 226               		.cfi_def_cfa_offset 10
+ 227               		.cfi_offset 15, -9
+ 228 007c 0F93      		push r16
+ 229               	.LCFI12:
+ 230               		.cfi_def_cfa_offset 11
+ 231               		.cfi_offset 16, -10
+ 232 007e 1F93      		push r17
+ 233               	.LCFI13:
+ 234               		.cfi_def_cfa_offset 12
+ 235               		.cfi_offset 17, -11
+ 236 0080 CF93      		push r28
+ 237               	.LCFI14:
+ 238               		.cfi_def_cfa_offset 13
+ 239               		.cfi_offset 28, -12
+ 240 0082 DF93      		push r29
+ 241               	.LCFI15:
+ 242               		.cfi_def_cfa_offset 14
+ 243               		.cfi_offset 29, -13
+ 244               	/* prologue: function */
+ 245               	/* frame size = 0 */
+ 246               	/* stack size = 12 */
+ 247               	.L__stack_usage = 12
+ 248 0084 6C01      		movw r12,r24
+ 249 0086 8B01      		movw r16,r22
+ 250 0088 942E      		mov r9,r20
+ 251 008a 852E      		mov r8,r21
+ 252 008c 7901      		movw r14,r18
+  33:util.c        **** 	uint16_t i;
+ 253               		.loc 1 33 2 is_stmt 1 view .LVU38
+  34:util.c        **** 
+  35:util.c        **** 	if(needle_len == 0)
+ 254               		.loc 1 35 2 view .LVU39
+  36:util.c        **** 	{
+  37:util.c        **** 		return haystack;
+ 255               		.loc 1 37 10 is_stmt 0 view .LVU40
+ 256 008e EC01      		movw r28,r24
+  35:util.c        **** 	{
+ 257               		.loc 1 35 4 view .LVU41
+ 258 0090 2115      		cp r18,__zero_reg__
+ 259 0092 3105      		cpc r19,__zero_reg__
+ 260 0094 01F0      		breq .L10
+  38:util.c        **** 	}
+  39:util.c        **** 
+  40:util.c        **** 	if(haystack_len < needle_len)
+ 261               		.loc 1 40 2 is_stmt 1 view .LVU42
+ 262               		.loc 1 40 4 is_stmt 0 view .LVU43
+ 263 0096 6217      		cp r22,r18
+ 264 0098 7307      		cpc r23,r19
+ 265 009a 00F0      		brlo .L14
+  41:util.c        **** 	{
+  42:util.c        **** 		return 0;
+  43:util.c        **** 	}
+  44:util.c        **** 
+  45:util.c        **** 	for(i = 0; i <= haystack_len - needle_len; ++i)
+ 266               		.loc 1 45 8 view .LVU44
+ 267 009c B12C      		mov r11,__zero_reg__
+ 268 009e A12C      		mov r10,__zero_reg__
+ 269               		.loc 1 45 31 view .LVU45
+ 270 00a0 021B      		sub r16,r18
+ 271 00a2 130B      		sbc r17,r19
+ 272               	.LVL21:
+ 273               	.L12:
+  46:util.c        **** 	{
+  47:util.c        **** 		if(mem_cmp(haystack + i, needle, needle_len))
+ 274               		.loc 1 47 3 is_stmt 1 view .LVU46
+ 275 00a4 E601      		movw r28,r12
+ 276 00a6 CA0D      		add r28,r10
+ 277 00a8 DB1D      		adc r29,r11
+ 278               		.loc 1 47 6 is_stmt 0 view .LVU47
+ 279 00aa A701      		movw r20,r14
+ 280 00ac 692D      		mov r22,r9
+ 281 00ae 782D      		mov r23,r8
+ 282 00b0 CE01      		movw r24,r28
+ 283 00b2 0E94 0000 		call mem_cmp
+ 284               	.LVL22:
+ 285               		.loc 1 47 5 view .LVU48
+ 286 00b6 8111      		cpse r24,__zero_reg__
+ 287 00b8 00C0      		rjmp .L10
+  45:util.c        **** 	{
+ 288               		.loc 1 45 45 discriminator 2 view .LVU49
+ 289 00ba 8FEF      		ldi r24,-1
+ 290 00bc A81A      		sub r10,r24
+ 291 00be B80A      		sbc r11,r24
+ 292               	.LVL23:
+  45:util.c        **** 	{
+ 293               		.loc 1 45 2 discriminator 2 view .LVU50
+ 294 00c0 0A15      		cp r16,r10
+ 295 00c2 1B05      		cpc r17,r11
+ 296 00c4 00F4      		brsh .L12
+ 297               	.LVL24:
+ 298               	.L14:
+  42:util.c        **** 	}
+ 299               		.loc 1 42 10 view .LVU51
+ 300 00c6 D0E0      		ldi r29,0
+ 301 00c8 C0E0      		ldi r28,0
+ 302               	.L10:
+  48:util.c        **** 		{
+  49:util.c        **** 			return haystack + i;
+  50:util.c        **** 		}
+  51:util.c        **** 	}
+  52:util.c        **** 
+  53:util.c        **** 	return 0;
+  54:util.c        **** }
+ 303               		.loc 1 54 1 view .LVU52
+ 304 00ca CE01      		movw r24,r28
+ 305               	/* epilogue start */
+ 306 00cc DF91      		pop r29
+ 307 00ce CF91      		pop r28
+ 308 00d0 1F91      		pop r17
+ 309 00d2 0F91      		pop r16
+ 310 00d4 FF90      		pop r15
+ 311 00d6 EF90      		pop r14
+ 312               	.LVL25:
+ 313               		.loc 1 54 1 view .LVU53
+ 314 00d8 DF90      		pop r13
+ 315 00da CF90      		pop r12
+ 316               	.LVL26:
+ 317               		.loc 1 54 1 view .LVU54
+ 318 00dc BF90      		pop r11
+ 319 00de AF90      		pop r10
+ 320 00e0 9F90      		pop r9
+ 321 00e2 8F90      		pop r8
+ 322 00e4 0895      		ret
+ 323               		.cfi_endproc
+ 324               	.LFE4:
+ 326               	.Letext0:
+ 327               		.file 2 "/usr/avr/include/stdint.h"
+DEFINED SYMBOLS
+                            *ABS*:0000000000000000 util.c
+     /tmp/ccEctxa7.s:2      *ABS*:000000000000003e __SP_H__
+     /tmp/ccEctxa7.s:3      *ABS*:000000000000003d __SP_L__
+     /tmp/ccEctxa7.s:4      *ABS*:000000000000003f __SREG__
+     /tmp/ccEctxa7.s:5      *ABS*:0000000000000000 __tmp_reg__
+     /tmp/ccEctxa7.s:6      *ABS*:0000000000000001 __zero_reg__
+     /tmp/ccEctxa7.s:12     .text:0000000000000000 ld_u32
+     /tmp/ccEctxa7.s:64     .text:0000000000000028 ld_u16
+     /tmp/ccEctxa7.s:87     .text:0000000000000030 mem_set
+     /tmp/ccEctxa7.s:125    .text:0000000000000046 mem_cmp
+     /tmp/ccEctxa7.s:190    .text:000000000000006c mem_mem
+
+NO UNDEFINED SYMBOLS

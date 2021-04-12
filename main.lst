@@ -1,0 +1,1684 @@
+   1               		.file	"main.c"
+   2               	__SP_H__ = 0x3e
+   3               	__SP_L__ = 0x3d
+   4               	__SREG__ = 0x3f
+   5               	__tmp_reg__ = 0
+   6               	__zero_reg__ = 1
+   7               		.text
+   8               	.Ltext0:
+   9               		.cfi_sections	.debug_frame
+  11               	error:
+  12               	.LFB7:
+  13               		.file 1 "main.c"
+   1:main.c        **** /* AVR ATMega328p Audio Player
+   2:main.c        ****  * Channels: 1 (Mono), 2 (Stereo)
+   3:main.c        ****  * Bit resolutions: 8 bit
+   4:main.c        ****  * PWM Timer0 Frequency: 16 000 000 Hz (F_CPU) / 256 = 62 500 Hz (MAX)
+   5:main.c        ****  */
+   6:main.c        **** 
+   7:main.c        **** #include "sd.h"
+   8:main.c        **** #include "fat.h"
+   9:main.c        **** #include "util.h"
+  10:main.c        **** #include <util/delay.h>
+  11:main.c        **** #include <avr/pgmspace.h>
+  12:main.c        **** #include <avr/interrupt.h>
+  13:main.c        **** 
+  14:main.c        **** #define PIN_LED               2
+  15:main.c        **** #define PIN_CHANNEL_RIGHT     5
+  16:main.c        **** #define PIN_CHANNEL_LEFT      6
+  17:main.c        **** 
+  18:main.c        **** #define BTN_DEBOUNCE_TICKS  200
+  19:main.c        **** 
+  20:main.c        **** #define ARRAY_LENGTH(a)        (sizeof(a) / sizeof(*a))
+  21:main.c        **** 
+  22:main.c        **** /* Timer 0: Noninverting Fast PWM on PD5 and PD6 (62.5 KHz) */
+  23:main.c        **** /* Timer 2: CTC Mode, Interrupt, Frequency is set separately */
+  24:main.c        **** #define TIMER_INIT() do { \
+  25:main.c        **** 	TCCR2A = (1 << WGM21); \
+  26:main.c        **** 	TIMSK2 = (1 << OCIE2A); \
+  27:main.c        **** 	TCCR0A = (1 << COM0A1) | (1 << COM0B1) | \
+  28:main.c        **** 		(1 << WGM01) | (1 << WGM00); \
+  29:main.c        **** 	OCR0A = 0; \
+  30:main.c        **** 	OCR0B = 0; \
+  31:main.c        **** } while(0);
+  32:main.c        **** 
+  33:main.c        **** /* Set Pins of the Led, the Left and the Right Channel to output */
+  34:main.c        **** /* Enable the internal pullup resistors for the buttons on PC0..3 */
+  35:main.c        **** #define IO_INIT() do { \
+  36:main.c        **** 	DDRD = (1 << PIN_LED); \
+  37:main.c        **** 	PORTC = 0x0F; \
+  38:main.c        **** } while(0);
+  39:main.c        **** 
+  40:main.c        **** /* Timer0 - No Prescaler, Timer2 - Prescaler F_CPU / 8 */
+  41:main.c        **** #define TIMER_START() do { \
+  42:main.c        **** 	DDRD |= (1 << PIN_CHANNEL_RIGHT) | (1 << PIN_CHANNEL_LEFT); \
+  43:main.c        **** 	TCCR2B = (1 << CS21); \
+  44:main.c        **** 	TCCR0B = (1 << CS00); \
+  45:main.c        **** } while(0);
+  46:main.c        **** 
+  47:main.c        **** #define TIMER_STOP() do { \
+  48:main.c        **** 	DDRD &= ~((1 << PIN_CHANNEL_RIGHT) | (1 << PIN_CHANNEL_LEFT)); \
+  49:main.c        **** 	TCCR0B = 0; \
+  50:main.c        **** 	TCCR2B = 0; \
+  51:main.c        **** } while(0);
+  52:main.c        **** 
+  53:main.c        **** struct
+  54:main.c        **** {
+  55:main.c        **** 	uint32_t sample_rate;
+  56:main.c        **** 	uint8_t compare_value;
+  57:main.c        **** }
+  58:main.c        **** /* OCR values for Timer 2 for different sample rates */
+  59:main.c        **** static sample_rates[] =
+  60:main.c        **** {
+  61:main.c        **** 	{  8000, 250 },
+  62:main.c        **** 	{ 11025, 181 },
+  63:main.c        **** 	{ 16000, 125 },
+  64:main.c        **** 	{ 22050,  91 },
+  65:main.c        **** 	{ 24000,  83 },
+  66:main.c        **** 	{ 32000,  63 },
+  67:main.c        **** 	{ 44100,  45 },
+  68:main.c        **** 	{ 48000,  42 }
+  69:main.c        **** };
+  70:main.c        **** 
+  71:main.c        **** struct
+  72:main.c        **** {
+  73:main.c        **** 	uint8_t num_channels, compare_value;
+  74:main.c        **** 	uint16_t offset;
+  75:main.c        **** 	uint32_t data_len;
+  76:main.c        **** }
+  77:main.c        **** static volatile wi;
+  78:main.c        **** 
+  79:main.c        **** /* Double Buffering */
+  80:main.c        **** static uint8_t buf0[512];
+  81:main.c        **** static uint8_t buf1[512];
+  82:main.c        **** 
+  83:main.c        **** static uint16_t max[2];
+  84:main.c        **** 
+  85:main.c        **** static volatile uint8_t
+  86:main.c        **** 	/* Set when the buffers are swapped */
+  87:main.c        **** 	flag,
+  88:main.c        **** 	/* The buffer from which currently is read */
+  89:main.c        **** 	cbuf;
+  90:main.c        **** 
+  91:main.c        **** /* The currently output byte */
+  92:main.c        **** static uint16_t ibuf = 0;
+  93:main.c        **** 
+  94:main.c        **** static void error(void)
+  95:main.c        **** {
+  14               		.loc 1 95 1 view -0
+  15               		.cfi_startproc
+  16               	/* prologue: function */
+  17               	/* frame size = 0 */
+  18               	/* stack size = 0 */
+  19               	.L__stack_usage = 0
+  96:main.c        **** 	TIMER_STOP();
+  20               		.loc 1 96 2 view .LVU1
+  21               		.loc 1 96 2 view .LVU2
+  22 0000 8AB1      		in r24,0xa
+  23 0002 8F79      		andi r24,lo8(-97)
+  24 0004 8AB9      		out 0xa,r24
+  25               		.loc 1 96 2 view .LVU3
+  26 0006 15BC      		out 0x25,__zero_reg__
+  27               		.loc 1 96 2 view .LVU4
+  28 0008 1092 B100 		sts 177,__zero_reg__
+  97:main.c        **** 	for(;;)
+  98:main.c        **** 	{
+  99:main.c        **** 		PORTD ^= (1 << PIN_LED);
+  29               		.loc 1 99 9 is_stmt 0 view .LVU5
+  30 000c 94E0      		ldi r25,lo8(4)
+  31               	.L2:
+  96:main.c        **** 	TIMER_STOP();
+  32               		.loc 1 96 2 is_stmt 1 discriminator 1 view .LVU6
+  96:main.c        **** 	TIMER_STOP();
+  33               		.loc 1 96 14 discriminator 1 view .LVU7
+  97:main.c        **** 	for(;;)
+  34               		.loc 1 97 2 discriminator 1 view .LVU8
+  35               		.loc 1 99 3 discriminator 1 view .LVU9
+  36               		.loc 1 99 9 is_stmt 0 discriminator 1 view .LVU10
+  37 000e 8BB1      		in r24,0xb
+  38 0010 8927      		eor r24,r25
+  39 0012 8BB9      		out 0xb,r24
+ 100:main.c        **** 		_delay_ms(500);
+  40               		.loc 1 100 3 is_stmt 1 discriminator 1 view .LVU11
+  41               	.LVL0:
+  42               	.LBB4:
+  43               	.LBI4:
+  44               		.file 2 "/usr/avr/include/util/delay.h"
+   1:/usr/avr/include/util/delay.h **** /* Copyright (c) 2002, Marek Michalkiewicz
+   2:/usr/avr/include/util/delay.h ****    Copyright (c) 2004,2005,2007 Joerg Wunsch
+   3:/usr/avr/include/util/delay.h ****    Copyright (c) 2007  Florin-Viorel Petrov
+   4:/usr/avr/include/util/delay.h ****    All rights reserved.
+   5:/usr/avr/include/util/delay.h **** 
+   6:/usr/avr/include/util/delay.h ****    Redistribution and use in source and binary forms, with or without
+   7:/usr/avr/include/util/delay.h ****    modification, are permitted provided that the following conditions are met:
+   8:/usr/avr/include/util/delay.h **** 
+   9:/usr/avr/include/util/delay.h ****    * Redistributions of source code must retain the above copyright
+  10:/usr/avr/include/util/delay.h ****      notice, this list of conditions and the following disclaimer.
+  11:/usr/avr/include/util/delay.h **** 
+  12:/usr/avr/include/util/delay.h ****    * Redistributions in binary form must reproduce the above copyright
+  13:/usr/avr/include/util/delay.h ****      notice, this list of conditions and the following disclaimer in
+  14:/usr/avr/include/util/delay.h ****      the documentation and/or other materials provided with the
+  15:/usr/avr/include/util/delay.h ****      distribution.
+  16:/usr/avr/include/util/delay.h **** 
+  17:/usr/avr/include/util/delay.h ****    * Neither the name of the copyright holders nor the names of
+  18:/usr/avr/include/util/delay.h ****      contributors may be used to endorse or promote products derived
+  19:/usr/avr/include/util/delay.h ****      from this software without specific prior written permission.
+  20:/usr/avr/include/util/delay.h **** 
+  21:/usr/avr/include/util/delay.h ****   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+  22:/usr/avr/include/util/delay.h ****   AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+  23:/usr/avr/include/util/delay.h ****   IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+  24:/usr/avr/include/util/delay.h ****   ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
+  25:/usr/avr/include/util/delay.h ****   LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+  26:/usr/avr/include/util/delay.h ****   CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+  27:/usr/avr/include/util/delay.h ****   SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+  28:/usr/avr/include/util/delay.h ****   INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+  29:/usr/avr/include/util/delay.h ****   CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+  30:/usr/avr/include/util/delay.h ****   ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+  31:/usr/avr/include/util/delay.h ****   POSSIBILITY OF SUCH DAMAGE. */
+  32:/usr/avr/include/util/delay.h **** 
+  33:/usr/avr/include/util/delay.h **** /* $Id: delay.h.in 2506 2016-02-08 10:05:45Z joerg_wunsch $ */
+  34:/usr/avr/include/util/delay.h **** 
+  35:/usr/avr/include/util/delay.h **** #ifndef _UTIL_DELAY_H_
+  36:/usr/avr/include/util/delay.h **** #define _UTIL_DELAY_H_ 1
+  37:/usr/avr/include/util/delay.h **** 
+  38:/usr/avr/include/util/delay.h **** #ifndef __DOXYGEN__
+  39:/usr/avr/include/util/delay.h **** #  ifndef __HAS_DELAY_CYCLES
+  40:/usr/avr/include/util/delay.h **** #    define __HAS_DELAY_CYCLES 1
+  41:/usr/avr/include/util/delay.h **** #  endif
+  42:/usr/avr/include/util/delay.h **** #endif  /* __DOXYGEN__ */
+  43:/usr/avr/include/util/delay.h **** 
+  44:/usr/avr/include/util/delay.h **** #include <inttypes.h>
+  45:/usr/avr/include/util/delay.h **** #include <util/delay_basic.h>
+  46:/usr/avr/include/util/delay.h **** #include <math.h>
+  47:/usr/avr/include/util/delay.h **** 
+  48:/usr/avr/include/util/delay.h **** /** \file */
+  49:/usr/avr/include/util/delay.h **** /** \defgroup util_delay <util/delay.h>: Convenience functions for busy-wait delay loops
+  50:/usr/avr/include/util/delay.h ****     \code
+  51:/usr/avr/include/util/delay.h ****     #define F_CPU 1000000UL  // 1 MHz
+  52:/usr/avr/include/util/delay.h ****     //#define F_CPU 14.7456E6
+  53:/usr/avr/include/util/delay.h ****     #include <util/delay.h>
+  54:/usr/avr/include/util/delay.h ****     \endcode
+  55:/usr/avr/include/util/delay.h **** 
+  56:/usr/avr/include/util/delay.h ****     \note As an alternative method, it is possible to pass the
+  57:/usr/avr/include/util/delay.h ****     F_CPU macro down to the compiler from the Makefile.
+  58:/usr/avr/include/util/delay.h ****     Obviously, in that case, no \c \#define statement should be
+  59:/usr/avr/include/util/delay.h ****     used.
+  60:/usr/avr/include/util/delay.h **** 
+  61:/usr/avr/include/util/delay.h ****     The functions in this header file are wrappers around the basic
+  62:/usr/avr/include/util/delay.h ****     busy-wait functions from <util/delay_basic.h>.  They are meant as
+  63:/usr/avr/include/util/delay.h ****     convenience functions where actual time values can be specified
+  64:/usr/avr/include/util/delay.h ****     rather than a number of cycles to wait for.  The idea behind is
+  65:/usr/avr/include/util/delay.h ****     that compile-time constant expressions will be eliminated by
+  66:/usr/avr/include/util/delay.h ****     compiler optimization so floating-point expressions can be used
+  67:/usr/avr/include/util/delay.h ****     to calculate the number of delay cycles needed based on the CPU
+  68:/usr/avr/include/util/delay.h ****     frequency passed by the macro F_CPU.
+  69:/usr/avr/include/util/delay.h **** 
+  70:/usr/avr/include/util/delay.h ****     \note In order for these functions to work as intended, compiler
+  71:/usr/avr/include/util/delay.h ****     optimizations <em>must</em> be enabled, and the delay time
+  72:/usr/avr/include/util/delay.h ****     <em>must</em> be an expression that is a known constant at
+  73:/usr/avr/include/util/delay.h ****     compile-time.  If these requirements are not met, the resulting
+  74:/usr/avr/include/util/delay.h ****     delay will be much longer (and basically unpredictable), and
+  75:/usr/avr/include/util/delay.h ****     applications that otherwise do not use floating-point calculations
+  76:/usr/avr/include/util/delay.h ****     will experience severe code bloat by the floating-point library
+  77:/usr/avr/include/util/delay.h ****     routines linked into the application.
+  78:/usr/avr/include/util/delay.h **** 
+  79:/usr/avr/include/util/delay.h ****     The functions available allow the specification of microsecond, and
+  80:/usr/avr/include/util/delay.h ****     millisecond delays directly, using the application-supplied macro
+  81:/usr/avr/include/util/delay.h ****     F_CPU as the CPU clock frequency (in Hertz).
+  82:/usr/avr/include/util/delay.h **** 
+  83:/usr/avr/include/util/delay.h **** */
+  84:/usr/avr/include/util/delay.h **** 
+  85:/usr/avr/include/util/delay.h **** #if !defined(__DOXYGEN__)
+  86:/usr/avr/include/util/delay.h **** static __inline__ void _delay_us(double __us) __attribute__((__always_inline__));
+  87:/usr/avr/include/util/delay.h **** static __inline__ void _delay_ms(double __ms) __attribute__((__always_inline__));
+  88:/usr/avr/include/util/delay.h **** #endif
+  89:/usr/avr/include/util/delay.h **** 
+  90:/usr/avr/include/util/delay.h **** #ifndef F_CPU
+  91:/usr/avr/include/util/delay.h **** /* prevent compiler error by supplying a default */
+  92:/usr/avr/include/util/delay.h **** # warning "F_CPU not defined for <util/delay.h>"
+  93:/usr/avr/include/util/delay.h **** /** \ingroup util_delay
+  94:/usr/avr/include/util/delay.h ****     \def F_CPU
+  95:/usr/avr/include/util/delay.h ****     \brief CPU frequency in Hz
+  96:/usr/avr/include/util/delay.h **** 
+  97:/usr/avr/include/util/delay.h ****     The macro F_CPU specifies the CPU frequency to be considered by
+  98:/usr/avr/include/util/delay.h ****     the delay macros.  This macro is normally supplied by the
+  99:/usr/avr/include/util/delay.h ****     environment (e.g. from within a project header, or the project's
+ 100:/usr/avr/include/util/delay.h ****     Makefile).  The value 1 MHz here is only provided as a "vanilla"
+ 101:/usr/avr/include/util/delay.h ****     fallback if no such user-provided definition could be found.
+ 102:/usr/avr/include/util/delay.h **** 
+ 103:/usr/avr/include/util/delay.h ****     In terms of the delay functions, the CPU frequency can be given as
+ 104:/usr/avr/include/util/delay.h ****     a floating-point constant (e.g. 3.6864E6 for 3.6864 MHz).
+ 105:/usr/avr/include/util/delay.h ****     However, the macros in <util/setbaud.h> require it to be an
+ 106:/usr/avr/include/util/delay.h ****     integer value.
+ 107:/usr/avr/include/util/delay.h ****  */
+ 108:/usr/avr/include/util/delay.h **** # define F_CPU 1000000UL
+ 109:/usr/avr/include/util/delay.h **** #endif
+ 110:/usr/avr/include/util/delay.h **** 
+ 111:/usr/avr/include/util/delay.h **** #ifndef __OPTIMIZE__
+ 112:/usr/avr/include/util/delay.h **** # warning "Compiler optimizations disabled; functions from <util/delay.h> won't work as designed"
+ 113:/usr/avr/include/util/delay.h **** #endif
+ 114:/usr/avr/include/util/delay.h **** 
+ 115:/usr/avr/include/util/delay.h **** #if __HAS_DELAY_CYCLES && defined(__OPTIMIZE__) && \
+ 116:/usr/avr/include/util/delay.h ****   !defined(__DELAY_BACKWARD_COMPATIBLE__) &&	   \
+ 117:/usr/avr/include/util/delay.h ****   __STDC_HOSTED__
+ 118:/usr/avr/include/util/delay.h **** #  include <math.h>
+ 119:/usr/avr/include/util/delay.h **** #endif
+ 120:/usr/avr/include/util/delay.h **** 
+ 121:/usr/avr/include/util/delay.h **** /**
+ 122:/usr/avr/include/util/delay.h ****    \ingroup util_delay
+ 123:/usr/avr/include/util/delay.h **** 
+ 124:/usr/avr/include/util/delay.h ****    Perform a delay of \c __ms milliseconds, using _delay_loop_2().
+ 125:/usr/avr/include/util/delay.h **** 
+ 126:/usr/avr/include/util/delay.h ****    The macro F_CPU is supposed to be defined to a
+ 127:/usr/avr/include/util/delay.h ****    constant defining the CPU clock frequency (in Hertz).
+ 128:/usr/avr/include/util/delay.h **** 
+ 129:/usr/avr/include/util/delay.h ****    The maximal possible delay is 262.14 ms / F_CPU in MHz.
+ 130:/usr/avr/include/util/delay.h **** 
+ 131:/usr/avr/include/util/delay.h ****    When the user request delay which exceed the maximum possible one,
+ 132:/usr/avr/include/util/delay.h ****    _delay_ms() provides a decreased resolution functionality. In this
+ 133:/usr/avr/include/util/delay.h ****    mode _delay_ms() will work with a resolution of 1/10 ms, providing
+ 134:/usr/avr/include/util/delay.h ****    delays up to 6.5535 seconds (independent from CPU frequency).  The
+ 135:/usr/avr/include/util/delay.h ****    user will not be informed about decreased resolution.
+ 136:/usr/avr/include/util/delay.h **** 
+ 137:/usr/avr/include/util/delay.h ****    If the avr-gcc toolchain has __builtin_avr_delay_cycles()
+ 138:/usr/avr/include/util/delay.h ****    support, maximal possible delay is 4294967.295 ms/ F_CPU in MHz. For
+ 139:/usr/avr/include/util/delay.h ****    values greater than the maximal possible delay, overflows results in
+ 140:/usr/avr/include/util/delay.h ****    no delay i.e., 0ms.
+ 141:/usr/avr/include/util/delay.h **** 
+ 142:/usr/avr/include/util/delay.h ****    Conversion of \c __ms into clock cycles may not always result in
+ 143:/usr/avr/include/util/delay.h ****    integer.  By default, the clock cycles rounded up to next
+ 144:/usr/avr/include/util/delay.h ****    integer. This ensures that the user gets at least \c __ms
+ 145:/usr/avr/include/util/delay.h ****    microseconds of delay.
+ 146:/usr/avr/include/util/delay.h **** 
+ 147:/usr/avr/include/util/delay.h ****    Alternatively, by defining the macro \c __DELAY_ROUND_DOWN__, or
+ 148:/usr/avr/include/util/delay.h ****    \c __DELAY_ROUND_CLOSEST__, before including this header file, the
+ 149:/usr/avr/include/util/delay.h ****    algorithm can be made to round down, or round to closest integer,
+ 150:/usr/avr/include/util/delay.h ****    respectively.
+ 151:/usr/avr/include/util/delay.h **** 
+ 152:/usr/avr/include/util/delay.h ****    \note
+ 153:/usr/avr/include/util/delay.h **** 
+ 154:/usr/avr/include/util/delay.h ****    The implementation of _delay_ms() based on
+ 155:/usr/avr/include/util/delay.h ****    __builtin_avr_delay_cycles() is not backward compatible with older
+ 156:/usr/avr/include/util/delay.h ****    implementations.  In order to get functionality backward compatible
+ 157:/usr/avr/include/util/delay.h ****    with previous versions, the macro \c "__DELAY_BACKWARD_COMPATIBLE__"
+ 158:/usr/avr/include/util/delay.h ****    must be defined before including this header file. Also, the
+ 159:/usr/avr/include/util/delay.h ****    backward compatible algorithm will be chosen if the code is
+ 160:/usr/avr/include/util/delay.h ****    compiled in a <em>freestanding environment</em> (GCC option
+ 161:/usr/avr/include/util/delay.h ****    \c -ffreestanding), as the math functions required for rounding are
+ 162:/usr/avr/include/util/delay.h ****    not available to the compiler then.
+ 163:/usr/avr/include/util/delay.h **** 
+ 164:/usr/avr/include/util/delay.h ****  */
+ 165:/usr/avr/include/util/delay.h **** void
+ 166:/usr/avr/include/util/delay.h **** _delay_ms(double __ms)
+  45               		.loc 2 166 1 discriminator 1 view .LVU12
+  46               	.LBB5:
+ 167:/usr/avr/include/util/delay.h **** {
+ 168:/usr/avr/include/util/delay.h **** 	double __tmp ;
+  47               		.loc 2 168 2 discriminator 1 view .LVU13
+ 169:/usr/avr/include/util/delay.h **** #if __HAS_DELAY_CYCLES && defined(__OPTIMIZE__) && \
+ 170:/usr/avr/include/util/delay.h ****   !defined(__DELAY_BACKWARD_COMPATIBLE__) &&	   \
+ 171:/usr/avr/include/util/delay.h ****   __STDC_HOSTED__
+ 172:/usr/avr/include/util/delay.h **** 	uint32_t __ticks_dc;
+  48               		.loc 2 172 2 discriminator 1 view .LVU14
+ 173:/usr/avr/include/util/delay.h **** 	extern void __builtin_avr_delay_cycles(unsigned long);
+  49               		.loc 2 173 2 discriminator 1 view .LVU15
+ 174:/usr/avr/include/util/delay.h **** 	__tmp = ((F_CPU) / 1e3) * __ms;
+  50               		.loc 2 174 2 discriminator 1 view .LVU16
+ 175:/usr/avr/include/util/delay.h **** 
+ 176:/usr/avr/include/util/delay.h **** 	#if defined(__DELAY_ROUND_DOWN__)
+ 177:/usr/avr/include/util/delay.h **** 		__ticks_dc = (uint32_t)fabs(__tmp);
+ 178:/usr/avr/include/util/delay.h **** 
+ 179:/usr/avr/include/util/delay.h **** 	#elif defined(__DELAY_ROUND_CLOSEST__)
+ 180:/usr/avr/include/util/delay.h **** 		__ticks_dc = (uint32_t)(fabs(__tmp)+0.5);
+ 181:/usr/avr/include/util/delay.h **** 
+ 182:/usr/avr/include/util/delay.h **** 	#else
+ 183:/usr/avr/include/util/delay.h **** 		//round up by default
+ 184:/usr/avr/include/util/delay.h **** 		__ticks_dc = (uint32_t)(ceil(fabs(__tmp)));
+  51               		.loc 2 184 3 discriminator 1 view .LVU17
+ 185:/usr/avr/include/util/delay.h **** 	#endif
+ 186:/usr/avr/include/util/delay.h **** 
+ 187:/usr/avr/include/util/delay.h **** 	__builtin_avr_delay_cycles(__ticks_dc);
+  52               		.loc 2 187 2 discriminator 1 view .LVU18
+  53 0014 2FEF      		ldi r18,lo8(1599999)
+  54 0016 39E6      		ldi r19,hi8(1599999)
+  55 0018 88E1      		ldi r24,hlo8(1599999)
+  56 001a 2150      	1:	subi r18,1
+  57 001c 3040      		sbci r19,0
+  58 001e 8040      		sbci r24,0
+  59 0020 01F4      		brne 1b
+  60 0022 00C0      		rjmp .
+  61 0024 0000      		nop
+  62 0026 00C0      		rjmp .L2
+  63               	.LBE5:
+  64               	.LBE4:
+  65               		.cfi_endproc
+  66               	.LFE7:
+  68               		.section	.rodata.str1.1,"aMS",@progbits,1
+  69               	.LC0:
+  70 0000 2F00      		.string	"/"
+  71               	.LC1:
+  72 0002 5249 4646 		.string	"RIFF"
+  72      00
+  73               	.LC2:
+  74 0007 5741 5645 		.string	"WAVEfmt "
+  74      666D 7420 
+  74      00
+  75               	.LC3:
+  76 0010 6461 7461 		.string	"data"
+  76      00
+  77               		.section	.text.startup,"ax",@progbits
+  78               	.global	main
+  80               	main:
+  81               	.LFB9:
+ 101:main.c        **** 	}
+ 102:main.c        **** }
+ 103:main.c        **** 
+ 104:main.c        **** static uint8_t wavinfo(void)
+ 105:main.c        **** {
+ 106:main.c        **** {
+ 107:main.c        **** 	uint16_t n;
+ 108:main.c        **** 	if(fat_fread(buf0, 512, &n) || n != 512)
+ 109:main.c        **** 	{
+ 110:main.c        **** 		return 1;
+ 111:main.c        **** 	}
+ 112:main.c        **** }
+ 113:main.c        **** 
+ 114:main.c        **** 	if(!mem_cmp(buf0, (uint8_t *)"RIFF", 4))
+ 115:main.c        **** 	{
+ 116:main.c        **** 		return 1;
+ 117:main.c        **** 	}
+ 118:main.c        **** 
+ 119:main.c        **** 	if(!mem_cmp(buf0 + 8, (uint8_t *)"WAVEfmt ", 8))
+ 120:main.c        **** 	{
+ 121:main.c        **** 		return 1;
+ 122:main.c        **** 	}
+ 123:main.c        **** 
+ 124:main.c        **** 	/* Subchunk1Size - PCM */
+ 125:main.c        **** 	if(ld_u32(buf0 + 16) != 16)
+ 126:main.c        **** 	{
+ 127:main.c        **** 		return 1;
+ 128:main.c        **** 	}
+ 129:main.c        **** 
+ 130:main.c        **** 	/* AudioFormat - Linear Quantization */
+ 131:main.c        **** 	if(ld_u16(buf0 + 20) != 1)
+ 132:main.c        **** 	{
+ 133:main.c        **** 		return 1;
+ 134:main.c        **** 	}
+ 135:main.c        **** 
+ 136:main.c        **** 	/* NumChannels */
+ 137:main.c        **** 	wi.num_channels = ld_u16(buf0 + 22);
+ 138:main.c        **** 	if(wi.num_channels != 1 && wi.num_channels != 2)
+ 139:main.c        **** 	{
+ 140:main.c        **** 		return 1;
+ 141:main.c        **** 	}
+ 142:main.c        **** 
+ 143:main.c        **** {
+ 144:main.c        **** 	/* SampleRate */
+ 145:main.c        **** 	uint8_t i;
+ 146:main.c        **** 	uint32_t sample_rate;
+ 147:main.c        **** 	sample_rate = ld_u32(buf0 + 24);
+ 148:main.c        **** 	for(i = 0; i < ARRAY_LENGTH(sample_rates); ++i)
+ 149:main.c        **** 	{
+ 150:main.c        **** 		if(sample_rate == sample_rates[i].sample_rate)
+ 151:main.c        **** 		{
+ 152:main.c        **** 			wi.compare_value = sample_rates[i].compare_value;
+ 153:main.c        **** 			break;
+ 154:main.c        **** 		}
+ 155:main.c        **** 	}
+ 156:main.c        **** 
+ 157:main.c        **** 	if(i == ARRAY_LENGTH(sample_rates))
+ 158:main.c        **** 	{
+ 159:main.c        **** 		return 1;
+ 160:main.c        **** 	}
+ 161:main.c        **** }
+ 162:main.c        **** 
+ 163:main.c        **** {
+ 164:main.c        **** 	const uint8_t *data_ptr;
+ 165:main.c        **** 	if(!(data_ptr = mem_mem(buf0 + 36, 512 - 36, (uint8_t *)"data", 4)))
+ 166:main.c        **** 	{
+ 167:main.c        **** 		return 1;
+ 168:main.c        **** 	}
+ 169:main.c        **** 
+ 170:main.c        **** 	wi.offset = data_ptr - buf0 + 8;
+ 171:main.c        **** 	wi.data_len = ld_u32(data_ptr + 4);
+ 172:main.c        **** }
+ 173:main.c        **** 
+ 174:main.c        **** 	return 0;
+ 175:main.c        **** }
+ 176:main.c        **** 
+ 177:main.c        **** int main(void)
+ 178:main.c        **** {
+  82               		.loc 1 178 1 view -0
+  83               		.cfi_startproc
+  84 0000 CDB7      		in r28,__SP_L__
+  85 0002 DEB7      		in r29,__SP_H__
+  86               	.LCFI0:
+  87               		.cfi_def_cfa_register 28
+  88 0004 AE97      		sbiw r28,46
+  89               	.LCFI1:
+  90               		.cfi_def_cfa_offset 48
+  91 0006 0FB6      		in __tmp_reg__,__SREG__
+  92 0008 F894      		cli
+  93 000a DEBF      		out __SP_H__,r29
+  94 000c 0FBE      		out __SREG__,__tmp_reg__
+  95 000e CDBF      		out __SP_L__,r28
+  96               	/* prologue: function */
+  97               	/* frame size = 46 */
+  98               	/* stack size = 46 */
+  99               	.L__stack_usage = 46
+ 179:main.c        **** 	dir_t d;
+ 100               		.loc 1 179 2 view .LVU20
+ 180:main.c        **** 	direntry_t di;
+ 101               		.loc 1 180 2 view .LVU21
+ 181:main.c        **** 	uint8_t res, i, stopped = 0, btns[4];
+ 102               		.loc 1 181 2 view .LVU22
+ 103               	.LVL1:
+ 182:main.c        **** 	uint16_t n = 0;
+ 104               		.loc 1 182 2 view .LVU23
+ 105               		.loc 1 182 11 is_stmt 0 view .LVU24
+ 106 0010 1AA6      		std Y+42,__zero_reg__
+ 107 0012 19A6      		std Y+41,__zero_reg__
+ 183:main.c        **** 	uint32_t nread = 0;
+ 108               		.loc 1 183 2 is_stmt 1 view .LVU25
+ 109               	.LVL2:
+ 184:main.c        **** 
+ 185:main.c        **** 	IO_INIT();
+ 110               		.loc 1 185 2 view .LVU26
+ 111               		.loc 1 185 2 view .LVU27
+ 112 0014 84E0      		ldi r24,lo8(4)
+ 113 0016 8AB9      		out 0xa,r24
+ 114               		.loc 1 185 2 view .LVU28
+ 115 0018 8FE0      		ldi r24,lo8(15)
+ 116 001a 88B9      		out 0x8,r24
+ 117               		.loc 1 185 2 view .LVU29
+ 118               		.loc 1 185 11 view .LVU30
+ 186:main.c        **** 	TIMER_INIT();
+ 119               		.loc 1 186 2 view .LVU31
+ 120               		.loc 1 186 2 view .LVU32
+ 121 001c 82E0      		ldi r24,lo8(2)
+ 122 001e 8093 B000 		sts 176,r24
+ 123               		.loc 1 186 2 view .LVU33
+ 124 0022 8093 7000 		sts 112,r24
+ 125               		.loc 1 186 2 view .LVU34
+ 126 0026 83EA      		ldi r24,lo8(-93)
+ 127 0028 84BD      		out 0x24,r24
+ 128               		.loc 1 186 2 view .LVU35
+ 129 002a 17BC      		out 0x27,__zero_reg__
+ 130               		.loc 1 186 2 view .LVU36
+ 131 002c 18BC      		out 0x28,__zero_reg__
+ 132               		.loc 1 186 2 view .LVU37
+ 133               		.loc 1 186 14 view .LVU38
+ 187:main.c        **** 	TIMER_STOP();
+ 134               		.loc 1 187 2 view .LVU39
+ 135               		.loc 1 187 2 view .LVU40
+ 136 002e 8AB1      		in r24,0xa
+ 137 0030 8F79      		andi r24,lo8(-97)
+ 138 0032 8AB9      		out 0xa,r24
+ 139               		.loc 1 187 2 view .LVU41
+ 140 0034 15BC      		out 0x25,__zero_reg__
+ 141               		.loc 1 187 2 view .LVU42
+ 142 0036 1092 B100 		sts 177,__zero_reg__
+ 143               		.loc 1 187 2 view .LVU43
+ 144               		.loc 1 187 14 view .LVU44
+ 188:main.c        **** 
+ 189:main.c        **** 	if(sd_init())
+ 145               		.loc 1 189 2 view .LVU45
+ 146               		.loc 1 189 5 is_stmt 0 view .LVU46
+ 147 003a 0E94 0000 		call sd_init
+ 148               	.LVL3:
+ 149               		.loc 1 189 4 view .LVU47
+ 150 003e 8111      		cpse r24,__zero_reg__
+ 151               	.LVL4:
+ 152               	.L5:
+ 190:main.c        **** 	{
+ 191:main.c        **** 		error();
+ 153               		.loc 1 191 3 is_stmt 1 view .LVU48
+ 154 0040 0E94 0000 		call error
+ 155               	.LVL5:
+ 156               	.L4:
+ 192:main.c        **** 	}
+ 193:main.c        **** 
+ 194:main.c        **** 	if(fat_mount())
+ 157               		.loc 1 194 2 view .LVU49
+ 158               		.loc 1 194 5 is_stmt 0 view .LVU50
+ 159 0044 0E94 0000 		call fat_mount
+ 160               	.LVL6:
+ 161               		.loc 1 194 4 view .LVU51
+ 162 0048 8111      		cpse r24,__zero_reg__
+ 163 004a 00C0      		rjmp .L5
+ 195:main.c        **** 	{
+ 196:main.c        **** 		error();
+ 197:main.c        **** 	}
+ 198:main.c        **** 
+ 199:main.c        **** 	if(fat_opendir(&d, "/"))
+ 164               		.loc 1 199 2 is_stmt 1 view .LVU52
+ 165               		.loc 1 199 5 is_stmt 0 view .LVU53
+ 166 004c 60E0      		ldi r22,lo8(.LC0)
+ 167 004e 70E0      		ldi r23,hi8(.LC0)
+ 168 0050 CE01      		movw r24,r28
+ 169 0052 4396      		adiw r24,19
+ 170 0054 0E94 0000 		call fat_opendir
+ 171               	.LVL7:
+ 172 0058 182F      		mov r17,r24
+ 200:main.c        **** 	{
+ 201:main.c        **** 		error();
+ 202:main.c        **** 	}
+ 203:main.c        **** 
+ 204:main.c        **** 	for(;;)
+ 205:main.c        **** 	{
+ 206:main.c        **** 		while(!(res = fat_readdir(&d, &di)))
+ 207:main.c        **** 		{
+ 208:main.c        **** 			if(di.type)
+ 209:main.c        **** 			{
+ 210:main.c        **** 				continue;
+ 211:main.c        **** 			}
+ 212:main.c        **** 
+ 213:main.c        **** 			if(fat_fopen(di.name))
+ 214:main.c        **** 			{
+ 215:main.c        **** 				continue;
+ 216:main.c        **** 			}
+ 217:main.c        **** 
+ 218:main.c        **** 			if(wavinfo())
+ 219:main.c        **** 			{
+ 220:main.c        **** 				continue;
+ 221:main.c        **** 			}
+ 222:main.c        **** 
+ 223:main.c        **** 			max[0] = 512;
+ 224:main.c        **** 			max[1] = 512;
+ 225:main.c        **** 			nread = 0;
+ 226:main.c        **** 			fat_fseek(0);
+ 227:main.c        **** 			ibuf = wi.offset;
+ 228:main.c        **** 			OCR2A = wi.compare_value;
+ 229:main.c        **** 			TIMER_START();
+ 230:main.c        **** 			sei();
+ 231:main.c        **** 			while(nread < wi.data_len)
+ 232:main.c        **** 			{
+ 233:main.c        **** 				if(flag)
+ 234:main.c        **** 				{
+ 235:main.c        **** 					if(fat_fread(cbuf ? buf0 : buf1, 512, &n))
+ 236:main.c        **** 					{
+ 237:main.c        **** 						error();
+ 238:main.c        **** 					}
+ 239:main.c        **** 
+ 240:main.c        **** 					if(n < 512)
+ 241:main.c        **** 					{
+ 242:main.c        **** 						max[!cbuf] = n;
+ 243:main.c        **** 					}
+ 244:main.c        **** 
+ 245:main.c        **** 					nread += n;
+ 246:main.c        **** 					flag = 0;
+ 247:main.c        **** 				}
+ 248:main.c        **** 
+ 249:main.c        **** 				for(i = 0; i < 4; ++i)
+ 250:main.c        **** 				{
+ 251:main.c        **** 					if(!(PINC & (1 << i)))
+ 252:main.c        **** 					{
+ 253:main.c        **** 						if(btns[i] < BTN_DEBOUNCE_TICKS)
+ 254:main.c        **** 						{
+ 255:main.c        **** 							++btns[i];
+ 256:main.c        **** 						}
+ 257:main.c        **** 						else if(btns[i] == BTN_DEBOUNCE_TICKS)
+ 258:main.c        **** 						{
+ 259:main.c        **** 							btns[i] = BTN_DEBOUNCE_TICKS + 1;
+ 173               		.loc 1 259 16 view .LVU54
+ 174 005a 09EC      		ldi r16,lo8(-55)
+ 199:main.c        **** 	{
+ 175               		.loc 1 199 4 view .LVU55
+ 176 005c 8111      		cpse r24,__zero_reg__
+ 177 005e 00C0      		rjmp .L5
+ 178               	.LVL8:
+ 179               	.L6:
+ 206:main.c        **** 		{
+ 180               		.loc 1 206 8 is_stmt 1 view .LVU56
+ 206:main.c        **** 		{
+ 181               		.loc 1 206 17 is_stmt 0 view .LVU57
+ 182 0060 BE01      		movw r22,r28
+ 183 0062 6F5F      		subi r22,-1
+ 184 0064 7F4F      		sbci r23,-1
+ 185 0066 CE01      		movw r24,r28
+ 186 0068 4396      		adiw r24,19
+ 187 006a 0E94 0000 		call fat_readdir
+ 188               	.LVL9:
+ 206:main.c        **** 		{
+ 189               		.loc 1 206 8 view .LVU58
+ 190 006e 8823      		tst r24
+ 191 0070 01F0      		breq .L27
+ 260:main.c        **** 							switch(i)
+ 261:main.c        **** 							{
+ 262:main.c        **** 							case 0:
+ 263:main.c        **** 								/* Play/Pause */
+ 264:main.c        **** 								if(stopped)
+ 265:main.c        **** 								{
+ 266:main.c        **** 									TIMER_START();
+ 267:main.c        **** 								}
+ 268:main.c        **** 								else
+ 269:main.c        **** 								{
+ 270:main.c        **** 									TIMER_STOP();
+ 271:main.c        **** 								}
+ 272:main.c        **** 
+ 273:main.c        **** 								stopped = !stopped;
+ 274:main.c        **** 								break;
+ 275:main.c        **** 							}
+ 276:main.c        **** 						}
+ 277:main.c        **** 					}
+ 278:main.c        **** 					else
+ 279:main.c        **** 					{
+ 280:main.c        **** 						btns[i] = 0;
+ 281:main.c        **** 					}
+ 282:main.c        **** 				}
+ 283:main.c        **** 			}
+ 284:main.c        **** 
+ 285:main.c        **** 			TIMER_STOP();
+ 286:main.c        **** 			cli();
+ 287:main.c        **** 		}
+ 288:main.c        **** 
+ 289:main.c        **** 		fat_readdir(&d, 0);
+ 192               		.loc 1 289 3 is_stmt 1 view .LVU59
+ 193 0072 70E0      		ldi r23,0
+ 194 0074 60E0      		ldi r22,0
+ 195 0076 CE01      		movw r24,r28
+ 196               	.LVL10:
+ 197               		.loc 1 289 3 is_stmt 0 view .LVU60
+ 198 0078 4396      		adiw r24,19
+ 199 007a 0E94 0000 		call fat_readdir
+ 200               	.LVL11:
+ 204:main.c        **** 	{
+ 201               		.loc 1 204 7 is_stmt 1 view .LVU61
+ 206:main.c        **** 		{
+ 202               		.loc 1 206 8 is_stmt 0 view .LVU62
+ 203 007e 00C0      		rjmp .L6
+ 204               	.LVL12:
+ 205               	.L27:
+ 208:main.c        **** 			{
+ 206               		.loc 1 208 4 is_stmt 1 view .LVU63
+ 208:main.c        **** 			{
+ 207               		.loc 1 208 6 is_stmt 0 view .LVU64
+ 208 0080 8D81      		ldd r24,Y+5
+ 209               	.LVL13:
+ 208:main.c        **** 			{
+ 210               		.loc 1 208 6 view .LVU65
+ 211 0082 8111      		cpse r24,__zero_reg__
+ 212 0084 00C0      		rjmp .L6
+ 213:main.c        **** 			{
+ 213               		.loc 1 213 4 is_stmt 1 view .LVU66
+ 213:main.c        **** 			{
+ 214               		.loc 1 213 7 is_stmt 0 view .LVU67
+ 215 0086 CE01      		movw r24,r28
+ 216 0088 0696      		adiw r24,6
+ 217 008a 0E94 0000 		call fat_fopen
+ 218               	.LVL14:
+ 213:main.c        **** 			{
+ 219               		.loc 1 213 6 view .LVU68
+ 220 008e 8111      		cpse r24,__zero_reg__
+ 221 0090 00C0      		rjmp .L6
+ 218:main.c        **** 			{
+ 222               		.loc 1 218 4 is_stmt 1 view .LVU69
+ 223               	.LBB11:
+ 224               	.LBI11:
+ 104:main.c        **** {
+ 225               		.loc 1 104 16 view .LVU70
+ 226               	.LBB12:
+ 227               	.LBB13:
+ 107:main.c        **** 	if(fat_fread(buf0, 512, &n) || n != 512)
+ 228               		.loc 1 107 2 view .LVU71
+ 108:main.c        **** 	{
+ 229               		.loc 1 108 2 view .LVU72
+ 108:main.c        **** 	{
+ 230               		.loc 1 108 5 is_stmt 0 view .LVU73
+ 231 0092 AE01      		movw r20,r28
+ 232 0094 495D      		subi r20,-39
+ 233 0096 5F4F      		sbci r21,-1
+ 234 0098 60E0      		ldi r22,0
+ 235 009a 72E0      		ldi r23,lo8(2)
+ 236 009c 80E0      		ldi r24,lo8(buf0)
+ 237 009e 90E0      		ldi r25,hi8(buf0)
+ 238 00a0 0E94 0000 		call fat_fread
+ 239               	.LVL15:
+ 108:main.c        **** 	{
+ 240               		.loc 1 108 4 view .LVU74
+ 241 00a4 8111      		cpse r24,__zero_reg__
+ 242 00a6 00C0      		rjmp .L6
+ 108:main.c        **** 	{
+ 243               		.loc 1 108 30 view .LVU75
+ 244 00a8 8FA1      		ldd r24,Y+39
+ 245 00aa 98A5      		ldd r25,Y+40
+ 246 00ac 8115      		cp r24,__zero_reg__
+ 247 00ae 9240      		sbci r25,2
+ 248 00b0 01F4      		brne .L6
+ 249               	.LBE13:
+ 114:main.c        **** 	{
+ 250               		.loc 1 114 2 is_stmt 1 view .LVU76
+ 114:main.c        **** 	{
+ 251               		.loc 1 114 6 is_stmt 0 view .LVU77
+ 252 00b2 44E0      		ldi r20,lo8(4)
+ 253 00b4 50E0      		ldi r21,0
+ 254 00b6 60E0      		ldi r22,lo8(.LC1)
+ 255 00b8 70E0      		ldi r23,hi8(.LC1)
+ 256 00ba 80E0      		ldi r24,lo8(buf0)
+ 257 00bc 90E0      		ldi r25,hi8(buf0)
+ 258 00be 0E94 0000 		call mem_cmp
+ 259               	.LVL16:
+ 114:main.c        **** 	{
+ 260               		.loc 1 114 4 view .LVU78
+ 261 00c2 8823      		tst r24
+ 262 00c4 01F0      		breq .L6
+ 119:main.c        **** 	{
+ 263               		.loc 1 119 2 is_stmt 1 view .LVU79
+ 119:main.c        **** 	{
+ 264               		.loc 1 119 6 is_stmt 0 view .LVU80
+ 265 00c6 48E0      		ldi r20,lo8(8)
+ 266 00c8 50E0      		ldi r21,0
+ 267 00ca 60E0      		ldi r22,lo8(.LC2)
+ 268 00cc 70E0      		ldi r23,hi8(.LC2)
+ 269 00ce 80E0      		ldi r24,lo8(buf0+8)
+ 270 00d0 90E0      		ldi r25,hi8(buf0+8)
+ 271 00d2 0E94 0000 		call mem_cmp
+ 272               	.LVL17:
+ 119:main.c        **** 	{
+ 273               		.loc 1 119 4 view .LVU81
+ 274 00d6 8823      		tst r24
+ 275 00d8 01F0      		breq .L6
+ 125:main.c        **** 	{
+ 276               		.loc 1 125 2 is_stmt 1 view .LVU82
+ 125:main.c        **** 	{
+ 277               		.loc 1 125 5 is_stmt 0 view .LVU83
+ 278 00da 80E0      		ldi r24,lo8(buf0+16)
+ 279 00dc 90E0      		ldi r25,hi8(buf0+16)
+ 280 00de 0E94 0000 		call ld_u32
+ 281               	.LVL18:
+ 282 00e2 6BA7      		std Y+43,r22
+ 283 00e4 7CA7      		std Y+44,r23
+ 284 00e6 8DA7      		std Y+45,r24
+ 285 00e8 9EA7      		std Y+46,r25
+ 125:main.c        **** 	{
+ 286               		.loc 1 125 4 view .LVU84
+ 287 00ea 6031      		cpi r22,16
+ 288 00ec 7105      		cpc r23,__zero_reg__
+ 289 00ee 8105      		cpc r24,__zero_reg__
+ 290 00f0 9105      		cpc r25,__zero_reg__
+ 291 00f2 01F0      		breq .+2
+ 292 00f4 00C0      		rjmp .L6
+ 131:main.c        **** 	{
+ 293               		.loc 1 131 2 is_stmt 1 view .LVU85
+ 131:main.c        **** 	{
+ 294               		.loc 1 131 5 is_stmt 0 view .LVU86
+ 295 00f6 80E0      		ldi r24,lo8(buf0+20)
+ 296 00f8 90E0      		ldi r25,hi8(buf0+20)
+ 297 00fa 0E94 0000 		call ld_u16
+ 298               	.LVL19:
+ 131:main.c        **** 	{
+ 299               		.loc 1 131 4 view .LVU87
+ 300 00fe 0197      		sbiw r24,1
+ 301 0100 01F0      		breq .+2
+ 302 0102 00C0      		rjmp .L6
+ 137:main.c        **** 	if(wi.num_channels != 1 && wi.num_channels != 2)
+ 303               		.loc 1 137 2 is_stmt 1 view .LVU88
+ 137:main.c        **** 	if(wi.num_channels != 1 && wi.num_channels != 2)
+ 304               		.loc 1 137 20 is_stmt 0 view .LVU89
+ 305 0104 80E0      		ldi r24,lo8(buf0+22)
+ 306 0106 90E0      		ldi r25,hi8(buf0+22)
+ 307 0108 0E94 0000 		call ld_u16
+ 308               	.LVL20:
+ 137:main.c        **** 	if(wi.num_channels != 1 && wi.num_channels != 2)
+ 309               		.loc 1 137 18 view .LVU90
+ 310 010c 8093 0000 		sts wi,r24
+ 138:main.c        **** 	{
+ 311               		.loc 1 138 2 is_stmt 1 view .LVU91
+ 138:main.c        **** 	{
+ 312               		.loc 1 138 7 is_stmt 0 view .LVU92
+ 313 0110 8091 0000 		lds r24,wi
+ 138:main.c        **** 	{
+ 314               		.loc 1 138 4 view .LVU93
+ 315 0114 8130      		cpi r24,lo8(1)
+ 316 0116 01F0      		breq .L10
+ 138:main.c        **** 	{
+ 317               		.loc 1 138 31 view .LVU94
+ 318 0118 8091 0000 		lds r24,wi
+ 138:main.c        **** 	{
+ 319               		.loc 1 138 26 view .LVU95
+ 320 011c 8230      		cpi r24,lo8(2)
+ 321 011e 01F0      		breq .+2
+ 322 0120 00C0      		rjmp .L6
+ 323               	.L10:
+ 324               	.LBB14:
+ 145:main.c        **** 	uint32_t sample_rate;
+ 325               		.loc 1 145 2 is_stmt 1 view .LVU96
+ 146:main.c        **** 	sample_rate = ld_u32(buf0 + 24);
+ 326               		.loc 1 146 2 view .LVU97
+ 147:main.c        **** 	for(i = 0; i < ARRAY_LENGTH(sample_rates); ++i)
+ 327               		.loc 1 147 2 view .LVU98
+ 147:main.c        **** 	for(i = 0; i < ARRAY_LENGTH(sample_rates); ++i)
+ 328               		.loc 1 147 16 is_stmt 0 view .LVU99
+ 329 0122 80E0      		ldi r24,lo8(buf0+24)
+ 330 0124 90E0      		ldi r25,hi8(buf0+24)
+ 331 0126 0E94 0000 		call ld_u32
+ 332               	.LVL21:
+ 333 012a 462F      		mov r20,r22
+ 334 012c 572F      		mov r21,r23
+ 335 012e BC01      		movw r22,r24
+ 336               	.LVL22:
+ 148:main.c        **** 	{
+ 337               		.loc 1 148 2 is_stmt 1 view .LVU100
+ 148:main.c        **** 	{
+ 338               		.loc 1 148 13 view .LVU101
+ 339 0130 E0E0      		ldi r30,lo8(sample_rates)
+ 340 0132 F0E0      		ldi r31,hi8(sample_rates)
+ 147:main.c        **** 	for(i = 0; i < ARRAY_LENGTH(sample_rates); ++i)
+ 341               		.loc 1 147 16 is_stmt 0 view .LVU102
+ 342 0134 90E0      		ldi r25,0
+ 343 0136 80E0      		ldi r24,0
+ 344               	.LVL23:
+ 345               	.L13:
+ 150:main.c        **** 		{
+ 346               		.loc 1 150 3 is_stmt 1 view .LVU103
+ 150:main.c        **** 		{
+ 347               		.loc 1 150 5 is_stmt 0 view .LVU104
+ 348 0138 C080      		ld r12,Z
+ 349 013a D180      		ldd r13,Z+1
+ 350 013c E280      		ldd r14,Z+2
+ 351 013e F380      		ldd r15,Z+3
+ 352 0140 4C15      		cp r20,r12
+ 353 0142 5D05      		cpc r21,r13
+ 354 0144 6E05      		cpc r22,r14
+ 355 0146 7F05      		cpc r23,r15
+ 356 0148 01F0      		breq .+2
+ 357 014a 00C0      		rjmp .L11
+ 152:main.c        **** 			break;
+ 358               		.loc 1 152 4 is_stmt 1 view .LVU105
+ 152:main.c        **** 			break;
+ 359               		.loc 1 152 38 is_stmt 0 view .LVU106
+ 360 014c 25E0      		ldi r18,lo8(5)
+ 361 014e 289F      		mul r18,r24
+ 362 0150 F001      		movw r30,r0
+ 363 0152 299F      		mul r18,r25
+ 364 0154 F00D      		add r31,r0
+ 365 0156 1124      		clr __zero_reg__
+ 366 0158 E050      		subi r30,lo8(-(sample_rates))
+ 367 015a F040      		sbci r31,hi8(-(sample_rates))
+ 368 015c 8481      		ldd r24,Z+4
+ 369               	.LVL24:
+ 152:main.c        **** 			break;
+ 370               		.loc 1 152 21 view .LVU107
+ 371 015e 8093 0000 		sts wi+1,r24
+ 153:main.c        **** 		}
+ 372               		.loc 1 153 4 is_stmt 1 view .LVU108
+ 157:main.c        **** 	{
+ 373               		.loc 1 157 2 view .LVU109
+ 374               	.LBE14:
+ 375               	.LBB15:
+ 164:main.c        **** 	if(!(data_ptr = mem_mem(buf0 + 36, 512 - 36, (uint8_t *)"data", 4)))
+ 376               		.loc 1 164 2 view .LVU110
+ 165:main.c        **** 	{
+ 377               		.loc 1 165 2 view .LVU111
+ 165:main.c        **** 	{
+ 378               		.loc 1 165 18 is_stmt 0 view .LVU112
+ 379 0162 24E0      		ldi r18,lo8(4)
+ 380 0164 30E0      		ldi r19,0
+ 381 0166 40E0      		ldi r20,lo8(.LC3)
+ 382 0168 50E0      		ldi r21,hi8(.LC3)
+ 383               	.LVL25:
+ 165:main.c        **** 	{
+ 384               		.loc 1 165 18 view .LVU113
+ 385 016a 6CED      		ldi r22,lo8(-36)
+ 386 016c 71E0      		ldi r23,lo8(1)
+ 387 016e 80E0      		ldi r24,lo8(buf0+36)
+ 388 0170 90E0      		ldi r25,hi8(buf0+36)
+ 389 0172 0E94 0000 		call mem_mem
+ 390               	.LVL26:
+ 391 0176 9C01      		movw r18,r24
+ 392               	.LVL27:
+ 165:main.c        **** 	{
+ 393               		.loc 1 165 4 view .LVU114
+ 394 0178 0097      		sbiw r24,0
+ 395 017a 01F4      		brne .+2
+ 396 017c 00C0      		rjmp .L6
+ 170:main.c        **** 	wi.data_len = ld_u32(data_ptr + 4);
+ 397               		.loc 1 170 2 is_stmt 1 view .LVU115
+ 170:main.c        **** 	wi.data_len = ld_u32(data_ptr + 4);
+ 398               		.loc 1 170 30 is_stmt 0 view .LVU116
+ 399 017e 8050      		subi r24,lo8(buf0-8)
+ 400 0180 9040      		sbci r25,hi8(buf0-8)
+ 170:main.c        **** 	wi.data_len = ld_u32(data_ptr + 4);
+ 401               		.loc 1 170 12 view .LVU117
+ 402 0182 9093 0000 		sts wi+2+1,r25
+ 403 0186 8093 0000 		sts wi+2,r24
+ 171:main.c        **** }
+ 404               		.loc 1 171 2 is_stmt 1 view .LVU118
+ 171:main.c        **** }
+ 405               		.loc 1 171 16 is_stmt 0 view .LVU119
+ 406 018a C901      		movw r24,r18
+ 407 018c 0496      		adiw r24,4
+ 408 018e 0E94 0000 		call ld_u32
+ 409               	.LVL28:
+ 171:main.c        **** }
+ 410               		.loc 1 171 16 view .LVU120
+ 411 0192 462F      		mov r20,r22
+ 412 0194 572F      		mov r21,r23
+ 413 0196 BC01      		movw r22,r24
+ 171:main.c        **** }
+ 414               		.loc 1 171 14 view .LVU121
+ 415 0198 4093 0000 		sts wi+4,r20
+ 416 019c 5093 0000 		sts wi+4+1,r21
+ 417 01a0 6093 0000 		sts wi+4+2,r22
+ 418 01a4 7093 0000 		sts wi+4+3,r23
+ 419               	.LBE15:
+ 174:main.c        **** }
+ 420               		.loc 1 174 2 is_stmt 1 view .LVU122
+ 174:main.c        **** }
+ 421               		.loc 1 174 2 is_stmt 0 view .LVU123
+ 422               	.LBE12:
+ 423               	.LBE11:
+ 223:main.c        **** 			max[1] = 512;
+ 424               		.loc 1 223 4 is_stmt 1 view .LVU124
+ 223:main.c        **** 			max[1] = 512;
+ 425               		.loc 1 223 11 is_stmt 0 view .LVU125
+ 426 01a8 80E0      		ldi r24,0
+ 427 01aa 92E0      		ldi r25,lo8(2)
+ 428 01ac 9093 0000 		sts max+1,r25
+ 429 01b0 8093 0000 		sts max,r24
+ 224:main.c        **** 			nread = 0;
+ 430               		.loc 1 224 4 is_stmt 1 view .LVU126
+ 224:main.c        **** 			nread = 0;
+ 431               		.loc 1 224 11 is_stmt 0 view .LVU127
+ 432 01b4 9093 0000 		sts max+2+1,r25
+ 433 01b8 8093 0000 		sts max+2,r24
+ 225:main.c        **** 			fat_fseek(0);
+ 434               		.loc 1 225 4 is_stmt 1 view .LVU128
+ 435               	.LVL29:
+ 226:main.c        **** 			ibuf = wi.offset;
+ 436               		.loc 1 226 4 view .LVU129
+ 437 01bc 60E0      		ldi r22,0
+ 438 01be 70E0      		ldi r23,0
+ 439 01c0 CB01      		movw r24,r22
+ 440 01c2 0E94 0000 		call fat_fseek
+ 441               	.LVL30:
+ 227:main.c        **** 			OCR2A = wi.compare_value;
+ 442               		.loc 1 227 4 view .LVU130
+ 227:main.c        **** 			OCR2A = wi.compare_value;
+ 443               		.loc 1 227 13 is_stmt 0 view .LVU131
+ 444 01c6 8091 0000 		lds r24,wi+2
+ 445 01ca 9091 0000 		lds r25,wi+2+1
+ 227:main.c        **** 			OCR2A = wi.compare_value;
+ 446               		.loc 1 227 9 view .LVU132
+ 447 01ce 9093 0000 		sts ibuf+1,r25
+ 448 01d2 8093 0000 		sts ibuf,r24
+ 228:main.c        **** 			TIMER_START();
+ 449               		.loc 1 228 4 is_stmt 1 view .LVU133
+ 228:main.c        **** 			TIMER_START();
+ 450               		.loc 1 228 14 is_stmt 0 view .LVU134
+ 451 01d6 8091 0000 		lds r24,wi+1
+ 228:main.c        **** 			TIMER_START();
+ 452               		.loc 1 228 10 view .LVU135
+ 453 01da 8093 B300 		sts 179,r24
+ 229:main.c        **** 			sei();
+ 454               		.loc 1 229 4 is_stmt 1 view .LVU136
+ 229:main.c        **** 			sei();
+ 455               		.loc 1 229 4 view .LVU137
+ 456 01de 8AB1      		in r24,0xa
+ 457 01e0 8066      		ori r24,lo8(96)
+ 458 01e2 8AB9      		out 0xa,r24
+ 229:main.c        **** 			sei();
+ 459               		.loc 1 229 4 view .LVU138
+ 460 01e4 82E0      		ldi r24,lo8(2)
+ 461 01e6 8093 B100 		sts 177,r24
+ 229:main.c        **** 			sei();
+ 462               		.loc 1 229 4 view .LVU139
+ 463 01ea 81E0      		ldi r24,lo8(1)
+ 464 01ec 85BD      		out 0x25,r24
+ 229:main.c        **** 			sei();
+ 465               		.loc 1 229 4 view .LVU140
+ 229:main.c        **** 			sei();
+ 466               		.loc 1 229 17 view .LVU141
+ 230:main.c        **** 			while(nread < wi.data_len)
+ 467               		.loc 1 230 4 view .LVU142
+ 468               	/* #APP */
+ 469               	 ;  230 "main.c" 1
+ 470 01ee 7894      		sei
+ 471               	 ;  0 "" 2
+ 231:main.c        **** 			{
+ 472               		.loc 1 231 4 view .LVU143
+ 225:main.c        **** 			fat_fseek(0);
+ 473               		.loc 1 225 10 is_stmt 0 view .LVU144
+ 474               	/* #NOAPP */
+ 475 01f0 C12C      		mov r12,__zero_reg__
+ 476 01f2 D12C      		mov r13,__zero_reg__
+ 477 01f4 7601      		movw r14,r12
+ 273:main.c        **** 								break;
+ 478               		.loc 1 273 19 view .LVU145
+ 479 01f6 BB24      		clr r11
+ 480 01f8 B394      		inc r11
+ 266:main.c        **** 								}
+ 481               		.loc 1 266 10 view .LVU146
+ 482 01fa 52E0      		ldi r21,lo8(2)
+ 483 01fc A52E      		mov r10,r21
+ 484               	.LVL31:
+ 485               	.L14:
+ 231:main.c        **** 			{
+ 486               		.loc 1 231 9 is_stmt 1 view .LVU147
+ 231:main.c        **** 			{
+ 487               		.loc 1 231 20 is_stmt 0 view .LVU148
+ 488 01fe 8091 0000 		lds r24,wi+4
+ 489 0202 9091 0000 		lds r25,wi+4+1
+ 490 0206 A091 0000 		lds r26,wi+4+2
+ 491 020a B091 0000 		lds r27,wi+4+3
+ 231:main.c        **** 			{
+ 492               		.loc 1 231 9 view .LVU149
+ 493 020e C816      		cp r12,r24
+ 494 0210 D906      		cpc r13,r25
+ 495 0212 EA06      		cpc r14,r26
+ 496 0214 FB06      		cpc r15,r27
+ 497 0216 00F0      		brlo .L26
+ 285:main.c        **** 			cli();
+ 498               		.loc 1 285 4 is_stmt 1 view .LVU150
+ 285:main.c        **** 			cli();
+ 499               		.loc 1 285 4 view .LVU151
+ 500 0218 8AB1      		in r24,0xa
+ 501 021a 8F79      		andi r24,lo8(-97)
+ 502 021c 8AB9      		out 0xa,r24
+ 285:main.c        **** 			cli();
+ 503               		.loc 1 285 4 view .LVU152
+ 504 021e 15BC      		out 0x25,__zero_reg__
+ 285:main.c        **** 			cli();
+ 505               		.loc 1 285 4 view .LVU153
+ 506 0220 1092 B100 		sts 177,__zero_reg__
+ 285:main.c        **** 			cli();
+ 507               		.loc 1 285 4 view .LVU154
+ 285:main.c        **** 			cli();
+ 508               		.loc 1 285 16 view .LVU155
+ 286:main.c        **** 		}
+ 509               		.loc 1 286 4 view .LVU156
+ 510               	/* #APP */
+ 511               	 ;  286 "main.c" 1
+ 512 0224 F894      		cli
+ 513               	 ;  0 "" 2
+ 514               	/* #NOAPP */
+ 515 0226 00C0      		rjmp .L6
+ 516               	.LVL32:
+ 517               	.L11:
+ 518               	.LBB18:
+ 519               	.LBB17:
+ 520               	.LBB16:
+ 148:main.c        **** 	{
+ 521               		.loc 1 148 45 view .LVU157
+ 148:main.c        **** 	{
+ 522               		.loc 1 148 13 view .LVU158
+ 523 0228 0196      		adiw r24,1
+ 524               	.LVL33:
+ 148:main.c        **** 	{
+ 525               		.loc 1 148 13 is_stmt 0 view .LVU159
+ 526 022a 3596      		adiw r30,5
+ 148:main.c        **** 	{
+ 527               		.loc 1 148 2 view .LVU160
+ 528 022c 8830      		cpi r24,8
+ 529 022e 9105      		cpc r25,__zero_reg__
+ 530 0230 01F0      		breq .+2
+ 531 0232 00C0      		rjmp .L13
+ 532 0234 00C0      		rjmp .L6
+ 533               	.LVL34:
+ 534               	.L26:
+ 148:main.c        **** 	{
+ 535               		.loc 1 148 2 view .LVU161
+ 536               	.LBE16:
+ 537               	.LBE17:
+ 538               	.LBE18:
+ 233:main.c        **** 				{
+ 539               		.loc 1 233 5 is_stmt 1 view .LVU162
+ 233:main.c        **** 				{
+ 540               		.loc 1 233 8 is_stmt 0 view .LVU163
+ 541 0236 8091 0000 		lds r24,flag
+ 233:main.c        **** 				{
+ 542               		.loc 1 233 7 view .LVU164
+ 543 023a 8823      		tst r24
+ 544 023c 01F0      		breq .L15
+ 235:main.c        **** 					{
+ 545               		.loc 1 235 6 is_stmt 1 view .LVU165
+ 235:main.c        **** 					{
+ 546               		.loc 1 235 24 is_stmt 0 view .LVU166
+ 547 023e 8091 0000 		lds r24,cbuf
+ 235:main.c        **** 					{
+ 548               		.loc 1 235 9 view .LVU167
+ 549 0242 8111      		cpse r24,__zero_reg__
+ 550 0244 00C0      		rjmp .L28
+ 551 0246 80E0      		ldi r24,lo8(buf1)
+ 552 0248 90E0      		ldi r25,hi8(buf1)
+ 553               	.L16:
+ 235:main.c        **** 					{
+ 554               		.loc 1 235 9 discriminator 4 view .LVU168
+ 555 024a AE01      		movw r20,r28
+ 556 024c 475D      		subi r20,-41
+ 557 024e 5F4F      		sbci r21,-1
+ 558 0250 60E0      		ldi r22,0
+ 559 0252 72E0      		ldi r23,lo8(2)
+ 560 0254 0E94 0000 		call fat_fread
+ 561               	.LVL35:
+ 235:main.c        **** 					{
+ 562               		.loc 1 235 8 discriminator 4 view .LVU169
+ 563 0258 8111      		cpse r24,__zero_reg__
+ 564 025a 00C0      		rjmp .L5
+ 240:main.c        **** 					{
+ 565               		.loc 1 240 6 is_stmt 1 view .LVU170
+ 240:main.c        **** 					{
+ 566               		.loc 1 240 11 is_stmt 0 view .LVU171
+ 567 025c 29A5      		ldd r18,Y+41
+ 568 025e 3AA5      		ldd r19,Y+42
+ 240:main.c        **** 					{
+ 569               		.loc 1 240 8 view .LVU172
+ 570 0260 2115      		cp r18,__zero_reg__
+ 571 0262 82E0      		ldi r24,2
+ 572 0264 3807      		cpc r19,r24
+ 573 0266 00F4      		brsh .L17
+ 242:main.c        **** 					}
+ 574               		.loc 1 242 7 is_stmt 1 view .LVU173
+ 242:main.c        **** 					}
+ 575               		.loc 1 242 11 is_stmt 0 view .LVU174
+ 576 0268 4091 0000 		lds r20,cbuf
+ 577 026c 81E0      		ldi r24,lo8(1)
+ 578 026e 90E0      		ldi r25,0
+ 579 0270 4423      		tst r20
+ 580 0272 01F0      		breq .L18
+ 581 0274 90E0      		ldi r25,0
+ 582 0276 80E0      		ldi r24,0
+ 583               	.L18:
+ 242:main.c        **** 					}
+ 584               		.loc 1 242 18 view .LVU175
+ 585 0278 880F      		lsl r24
+ 586 027a 991F      		rol r25
+ 587 027c FC01      		movw r30,r24
+ 588 027e E050      		subi r30,lo8(-(max))
+ 589 0280 F040      		sbci r31,hi8(-(max))
+ 590 0282 3183      		std Z+1,r19
+ 591 0284 2083      		st Z,r18
+ 592               	.L17:
+ 245:main.c        **** 					flag = 0;
+ 593               		.loc 1 245 6 is_stmt 1 view .LVU176
+ 245:main.c        **** 					flag = 0;
+ 594               		.loc 1 245 12 is_stmt 0 view .LVU177
+ 595 0286 C20E      		add r12,r18
+ 596 0288 D31E      		adc r13,r19
+ 597 028a E11C      		adc r14,__zero_reg__
+ 598 028c F11C      		adc r15,__zero_reg__
+ 599               	.LVL36:
+ 246:main.c        **** 				}
+ 600               		.loc 1 246 6 is_stmt 1 view .LVU178
+ 246:main.c        **** 				}
+ 601               		.loc 1 246 11 is_stmt 0 view .LVU179
+ 602 028e 1092 0000 		sts flag,__zero_reg__
+ 603               	.L15:
+ 249:main.c        **** 				{
+ 604               		.loc 1 249 5 is_stmt 1 view .LVU180
+ 605               	.LVL37:
+ 249:main.c        **** 				{
+ 606               		.loc 1 249 16 view .LVU181
+ 235:main.c        **** 					{
+ 607               		.loc 1 235 9 is_stmt 0 view .LVU182
+ 608 0292 30E0      		ldi r19,0
+ 609 0294 20E0      		ldi r18,0
+ 610               	.LVL38:
+ 611               	.L25:
+ 251:main.c        **** 					{
+ 612               		.loc 1 251 6 is_stmt 1 view .LVU183
+ 251:main.c        **** 					{
+ 613               		.loc 1 251 11 is_stmt 0 view .LVU184
+ 614 0296 86B1      		in r24,0x6
+ 615 0298 90E0      		ldi r25,0
+ 251:main.c        **** 					{
+ 616               		.loc 1 251 9 view .LVU185
+ 617 029a 022E      		mov r0,r18
+ 618 029c 00C0      		rjmp 2f
+ 619               		1:
+ 620 029e 9595      		asr r25
+ 621 02a0 8795      		ror r24
+ 622               		2:
+ 623 02a2 0A94      		dec r0
+ 624 02a4 02F4      		brpl 1b
+ 625 02a6 E3E2      		ldi r30,lo8(35)
+ 626 02a8 F0E0      		ldi r31,0
+ 627 02aa EC0F      		add r30,r28
+ 628 02ac FD1F      		adc r31,r29
+ 629 02ae E20F      		add r30,r18
+ 630 02b0 F31F      		adc r31,r19
+ 251:main.c        **** 					{
+ 631               		.loc 1 251 8 view .LVU186
+ 632 02b2 80FD      		sbrc r24,0
+ 633 02b4 00C0      		rjmp .L19
+ 253:main.c        **** 						{
+ 634               		.loc 1 253 7 is_stmt 1 view .LVU187
+ 253:main.c        **** 						{
+ 635               		.loc 1 253 14 is_stmt 0 view .LVU188
+ 636 02b6 8081      		ld r24,Z
+ 253:main.c        **** 						{
+ 637               		.loc 1 253 9 view .LVU189
+ 638 02b8 883C      		cpi r24,lo8(-56)
+ 639 02ba 00F4      		brsh .L20
+ 255:main.c        **** 						}
+ 640               		.loc 1 255 8 is_stmt 1 view .LVU190
+ 641 02bc 8F5F      		subi r24,lo8(-(1))
+ 642 02be 8083      		st Z,r24
+ 643               	.LVL39:
+ 644               	.L21:
+ 249:main.c        **** 				{
+ 645               		.loc 1 249 23 discriminator 2 view .LVU191
+ 249:main.c        **** 				{
+ 646               		.loc 1 249 16 discriminator 2 view .LVU192
+ 647 02c0 2F5F      		subi r18,-1
+ 648 02c2 3F4F      		sbci r19,-1
+ 649               	.LVL40:
+ 249:main.c        **** 				{
+ 650               		.loc 1 249 5 is_stmt 0 discriminator 2 view .LVU193
+ 651 02c4 2430      		cpi r18,4
+ 652 02c6 3105      		cpc r19,__zero_reg__
+ 653 02c8 01F4      		brne .L25
+ 654 02ca 00C0      		rjmp .L14
+ 655               	.LVL41:
+ 656               	.L28:
+ 235:main.c        **** 					{
+ 657               		.loc 1 235 9 view .LVU194
+ 658 02cc 80E0      		ldi r24,lo8(buf0)
+ 659 02ce 90E0      		ldi r25,hi8(buf0)
+ 660 02d0 00C0      		rjmp .L16
+ 661               	.LVL42:
+ 662               	.L20:
+ 257:main.c        **** 						{
+ 663               		.loc 1 257 12 is_stmt 1 view .LVU195
+ 257:main.c        **** 						{
+ 664               		.loc 1 257 14 is_stmt 0 view .LVU196
+ 665 02d2 883C      		cpi r24,lo8(-56)
+ 666 02d4 01F4      		brne .L21
+ 259:main.c        **** 							switch(i)
+ 667               		.loc 1 259 8 is_stmt 1 view .LVU197
+ 259:main.c        **** 							switch(i)
+ 668               		.loc 1 259 16 is_stmt 0 view .LVU198
+ 669 02d6 0083      		st Z,r16
+ 260:main.c        **** 							{
+ 670               		.loc 1 260 8 is_stmt 1 view .LVU199
+ 671 02d8 2111      		cpse r18,__zero_reg__
+ 672 02da 00C0      		rjmp .L21
+ 264:main.c        **** 								{
+ 673               		.loc 1 264 9 view .LVU200
+ 266:main.c        **** 								}
+ 674               		.loc 1 266 10 is_stmt 0 view .LVU201
+ 675 02dc 8AB1      		in r24,0xa
+ 264:main.c        **** 								{
+ 676               		.loc 1 264 11 view .LVU202
+ 677 02de 1123      		tst r17
+ 678 02e0 01F0      		breq .L22
+ 266:main.c        **** 								}
+ 679               		.loc 1 266 10 is_stmt 1 view .LVU203
+ 266:main.c        **** 								}
+ 680               		.loc 1 266 10 view .LVU204
+ 681 02e2 8066      		ori r24,lo8(96)
+ 682 02e4 8AB9      		out 0xa,r24
+ 266:main.c        **** 								}
+ 683               		.loc 1 266 10 view .LVU205
+ 684 02e6 A092 B100 		sts 177,r10
+ 266:main.c        **** 								}
+ 685               		.loc 1 266 10 view .LVU206
+ 686 02ea B5BC      		out 0x25,r11
+ 266:main.c        **** 								}
+ 687               		.loc 1 266 10 view .LVU207
+ 266:main.c        **** 								}
+ 688               		.loc 1 266 23 view .LVU208
+ 689               	.L23:
+ 270:main.c        **** 								}
+ 690               		.loc 1 270 10 discriminator 1 view .LVU209
+ 270:main.c        **** 								}
+ 691               		.loc 1 270 22 discriminator 1 view .LVU210
+ 273:main.c        **** 								break;
+ 692               		.loc 1 273 9 discriminator 1 view .LVU211
+ 273:main.c        **** 								break;
+ 693               		.loc 1 273 19 is_stmt 0 discriminator 1 view .LVU212
+ 694 02ec 81E0      		ldi r24,lo8(1)
+ 695 02ee 1111      		cpse r17,__zero_reg__
+ 696 02f0 80E0      		ldi r24,0
+ 697               	.L24:
+ 273:main.c        **** 								break;
+ 698               		.loc 1 273 17 discriminator 1 view .LVU213
+ 699 02f2 182F      		mov r17,r24
+ 700               	.LVL43:
+ 274:main.c        **** 							}
+ 701               		.loc 1 274 9 is_stmt 1 discriminator 1 view .LVU214
+ 702 02f4 00C0      		rjmp .L21
+ 703               	.LVL44:
+ 704               	.L22:
+ 270:main.c        **** 								}
+ 705               		.loc 1 270 10 view .LVU215
+ 270:main.c        **** 								}
+ 706               		.loc 1 270 10 view .LVU216
+ 707 02f6 8F79      		andi r24,lo8(-97)
+ 708 02f8 8AB9      		out 0xa,r24
+ 270:main.c        **** 								}
+ 709               		.loc 1 270 10 view .LVU217
+ 710 02fa 15BC      		out 0x25,__zero_reg__
+ 270:main.c        **** 								}
+ 711               		.loc 1 270 10 view .LVU218
+ 712 02fc 1092 B100 		sts 177,__zero_reg__
+ 713 0300 00C0      		rjmp .L23
+ 714               	.L19:
+ 280:main.c        **** 					}
+ 715               		.loc 1 280 7 view .LVU219
+ 280:main.c        **** 					}
+ 716               		.loc 1 280 15 is_stmt 0 view .LVU220
+ 717 0302 1082      		st Z,__zero_reg__
+ 718 0304 00C0      		rjmp .L21
+ 719               		.cfi_endproc
+ 720               	.LFE9:
+ 722               		.text
+ 723               	.global	__vector_7
+ 725               	__vector_7:
+ 726               	.LFB10:
+ 290:main.c        **** 	}
+ 291:main.c        **** 
+ 292:main.c        **** 	return 0;
+ 293:main.c        **** }
+ 294:main.c        **** 
+ 295:main.c        **** ISR(TIMER2_COMPA_vect)
+ 296:main.c        **** {
+ 727               		.loc 1 296 1 is_stmt 1 view -0
+ 728               		.cfi_startproc
+ 729 0028 1F92 1FB6 		__gcc_isr 1
+ 729      1F92 1124 
+ 729      2F93 
+ 730 0032 3F93      		push r19
+ 731               	.LCFI2:
+ 732               		.cfi_def_cfa_offset 3
+ 733               		.cfi_offset 19, -2
+ 734 0034 8F93      		push r24
+ 735               	.LCFI3:
+ 736               		.cfi_def_cfa_offset 4
+ 737               		.cfi_offset 24, -3
+ 738 0036 9F93      		push r25
+ 739               	.LCFI4:
+ 740               		.cfi_def_cfa_offset 5
+ 741               		.cfi_offset 25, -4
+ 742 0038 EF93      		push r30
+ 743               	.LCFI5:
+ 744               		.cfi_def_cfa_offset 6
+ 745               		.cfi_offset 30, -5
+ 746 003a FF93      		push r31
+ 747               	.LCFI6:
+ 748               		.cfi_def_cfa_offset 7
+ 749               		.cfi_offset 31, -6
+ 750               	/* prologue: Signal */
+ 751               	/* frame size = 0 */
+ 752               	/* stack size = 5...9 */
+ 753               	.L__stack_usage = 5 + __gcc_isr.n_pushed
+ 297:main.c        **** 	if(wi.num_channels == 1)
+ 754               		.loc 1 297 2 view .LVU222
+ 755               		.loc 1 297 7 is_stmt 0 view .LVU223
+ 756 003c 2091 0000 		lds r18,wi
+ 757 0040 8091 0000 		lds r24,ibuf
+ 758 0044 9091 0000 		lds r25,ibuf+1
+ 759               		.loc 1 297 4 view .LVU224
+ 760 0048 2130      		cpi r18,lo8(1)
+ 761 004a 01F4      		brne .L54
+ 762               	.LBB19:
+ 298:main.c        **** 	{
+ 299:main.c        **** 		/* mono */
+ 300:main.c        **** 		uint8_t sample = cbuf ? buf1[ibuf] : buf0[ibuf];
+ 763               		.loc 1 300 3 is_stmt 1 view .LVU225
+ 764               		.loc 1 300 25 is_stmt 0 view .LVU226
+ 765 004c 2091 0000 		lds r18,cbuf
+ 766               		.loc 1 300 11 view .LVU227
+ 767 0050 2223      		tst r18
+ 768 0052 01F0      		breq .L55
+ 769               		.loc 1 300 11 discriminator 1 view .LVU228
+ 770 0054 8050      		subi r24,lo8(-(buf1))
+ 771 0056 9040      		sbci r25,hi8(-(buf1))
+ 772               	.L72:
+ 773               		.loc 1 300 11 discriminator 2 view .LVU229
+ 774 0058 FC01      		movw r30,r24
+ 775 005a 8081      		ld r24,Z
+ 776               	.LVL45:
+ 301:main.c        **** 		OCR0A = sample;
+ 777               		.loc 1 301 3 is_stmt 1 discriminator 2 view .LVU230
+ 778               		.loc 1 301 9 is_stmt 0 discriminator 2 view .LVU231
+ 779 005c 87BD      		out 0x27,r24
+ 302:main.c        **** 		OCR0B = sample;
+ 780               		.loc 1 302 3 is_stmt 1 discriminator 2 view .LVU232
+ 781               		.loc 1 302 9 is_stmt 0 discriminator 2 view .LVU233
+ 782 005e 88BD      		out 0x28,r24
+ 303:main.c        **** 		if(++ibuf == max[cbuf])
+ 783               		.loc 1 303 3 is_stmt 1 discriminator 2 view .LVU234
+ 784               		.loc 1 303 6 is_stmt 0 discriminator 2 view .LVU235
+ 785 0060 8091 0000 		lds r24,ibuf
+ 786 0064 9091 0000 		lds r25,ibuf+1
+ 787               	.LVL46:
+ 788               		.loc 1 303 6 discriminator 2 view .LVU236
+ 789 0068 0196      		adiw r24,1
+ 790               	.LVL47:
+ 791               	.L78:
+ 792               		.loc 1 303 6 discriminator 2 view .LVU237
+ 793               	.LBE19:
+ 304:main.c        **** 		{
+ 305:main.c        **** 			ibuf = 0;
+ 306:main.c        **** 			cbuf = !cbuf;
+ 307:main.c        **** 			flag = 1;
+ 308:main.c        **** 		}
+ 309:main.c        **** 	}
+ 310:main.c        **** 	else
+ 311:main.c        **** 	{
+ 312:main.c        **** 		/* stereo */
+ 313:main.c        **** 		OCR0A = cbuf ? buf1[ibuf] : buf0[ibuf];
+ 314:main.c        **** 		OCR0B = cbuf ? buf1[ibuf + 1] : buf0[ibuf + 1];
+ 315:main.c        **** 		ibuf += 2;
+ 794               		.loc 1 315 8 discriminator 2 view .LVU238
+ 795 006a 9093 0000 		sts ibuf+1,r25
+ 796 006e 8093 0000 		sts ibuf,r24
+ 316:main.c        **** 		if(ibuf == max[cbuf])
+ 797               		.loc 1 316 3 is_stmt 1 discriminator 2 view .LVU239
+ 798               		.loc 1 316 17 is_stmt 0 discriminator 2 view .LVU240
+ 799 0072 E091 0000 		lds r30,cbuf
+ 800 0076 F0E0      		ldi r31,0
+ 801 0078 EE0F      		lsl r30
+ 802 007a FF1F      		rol r31
+ 803 007c E050      		subi r30,lo8(-(max))
+ 804 007e F040      		sbci r31,hi8(-(max))
+ 805               		.loc 1 316 5 discriminator 2 view .LVU241
+ 806 0080 2081      		ld r18,Z
+ 807 0082 3181      		ldd r19,Z+1
+ 808 0084 8217      		cp r24,r18
+ 809 0086 9307      		cpc r25,r19
+ 810 0088 01F4      		brne .L53
+ 317:main.c        **** 		{
+ 318:main.c        **** 			ibuf = 0;
+ 811               		.loc 1 318 4 is_stmt 1 view .LVU242
+ 812               		.loc 1 318 9 is_stmt 0 view .LVU243
+ 813 008a 1092 0000 		sts ibuf+1,__zero_reg__
+ 814 008e 1092 0000 		sts ibuf,__zero_reg__
+ 319:main.c        **** 			cbuf = !cbuf;
+ 815               		.loc 1 319 4 is_stmt 1 view .LVU244
+ 816               		.loc 1 319 11 is_stmt 0 view .LVU245
+ 817 0092 9091 0000 		lds r25,cbuf
+ 818 0096 81E0      		ldi r24,lo8(1)
+ 819 0098 9111      		cpse r25,__zero_reg__
+ 820 009a 80E0      		ldi r24,0
+ 821               	.L65:
+ 822               		.loc 1 319 9 view .LVU246
+ 823 009c 8093 0000 		sts cbuf,r24
+ 320:main.c        **** 			flag = 1;
+ 824               		.loc 1 320 4 is_stmt 1 view .LVU247
+ 825               		.loc 1 320 9 is_stmt 0 view .LVU248
+ 826 00a0 81E0      		ldi r24,lo8(1)
+ 827 00a2 8093 0000 		sts flag,r24
+ 828               	.L53:
+ 829               	/* epilogue start */
+ 321:main.c        **** 		}
+ 322:main.c        **** 	}
+ 323:main.c        **** }
+ 830               		.loc 1 323 1 view .LVU249
+ 831 00a6 FF91      		pop r31
+ 832 00a8 EF91      		pop r30
+ 833 00aa 9F91      		pop r25
+ 834 00ac 8F91      		pop r24
+ 835 00ae 3F91      		pop r19
+ 836 00b0 2F91 1F90 		__gcc_isr 2
+ 836      1FBE 1F90 
+ 837 00b8 1895      		reti
+ 838               	.L55:
+ 839               	.LBB20:
+ 300:main.c        **** 		OCR0A = sample;
+ 840               		.loc 1 300 11 discriminator 2 view .LVU250
+ 841 00ba 8050      		subi r24,lo8(-(buf0))
+ 842 00bc 9040      		sbci r25,hi8(-(buf0))
+ 843 00be 00C0      		rjmp .L72
+ 844               	.L54:
+ 845               	.LBE20:
+ 313:main.c        **** 		OCR0B = cbuf ? buf1[ibuf + 1] : buf0[ibuf + 1];
+ 846               		.loc 1 313 3 is_stmt 1 view .LVU251
+ 313:main.c        **** 		OCR0B = cbuf ? buf1[ibuf + 1] : buf0[ibuf + 1];
+ 847               		.loc 1 313 16 is_stmt 0 view .LVU252
+ 848 00c0 2091 0000 		lds r18,cbuf
+ 313:main.c        **** 		OCR0B = cbuf ? buf1[ibuf + 1] : buf0[ibuf + 1];
+ 849               		.loc 1 313 9 view .LVU253
+ 850 00c4 2223      		tst r18
+ 851 00c6 01F0      		breq .L60
+ 313:main.c        **** 		OCR0B = cbuf ? buf1[ibuf + 1] : buf0[ibuf + 1];
+ 852               		.loc 1 313 9 discriminator 1 view .LVU254
+ 853 00c8 8050      		subi r24,lo8(-(buf1))
+ 854 00ca 9040      		sbci r25,hi8(-(buf1))
+ 855               	.L73:
+ 313:main.c        **** 		OCR0B = cbuf ? buf1[ibuf + 1] : buf0[ibuf + 1];
+ 856               		.loc 1 313 9 discriminator 2 view .LVU255
+ 857 00cc FC01      		movw r30,r24
+ 858 00ce 8081      		ld r24,Z
+ 859 00d0 87BD      		out 0x27,r24
+ 314:main.c        **** 		ibuf += 2;
+ 860               		.loc 1 314 3 is_stmt 1 discriminator 2 view .LVU256
+ 314:main.c        **** 		ibuf += 2;
+ 861               		.loc 1 314 16 is_stmt 0 discriminator 2 view .LVU257
+ 862 00d2 2091 0000 		lds r18,cbuf
+ 863 00d6 8091 0000 		lds r24,ibuf
+ 864 00da 9091 0000 		lds r25,ibuf+1
+ 314:main.c        **** 		ibuf += 2;
+ 865               		.loc 1 314 9 discriminator 2 view .LVU258
+ 866 00de 2223      		tst r18
+ 867 00e0 01F0      		breq .L62
+ 314:main.c        **** 		ibuf += 2;
+ 868               		.loc 1 314 9 discriminator 1 view .LVU259
+ 869 00e2 8050      		subi r24,lo8(-(buf1))
+ 870 00e4 9040      		sbci r25,hi8(-(buf1))
+ 871               	.L74:
+ 314:main.c        **** 		ibuf += 2;
+ 872               		.loc 1 314 9 discriminator 2 view .LVU260
+ 873 00e6 FC01      		movw r30,r24
+ 874 00e8 8181      		ldd r24,Z+1
+ 875 00ea 88BD      		out 0x28,r24
+ 315:main.c        **** 		if(ibuf == max[cbuf])
+ 876               		.loc 1 315 3 is_stmt 1 discriminator 2 view .LVU261
+ 315:main.c        **** 		if(ibuf == max[cbuf])
+ 877               		.loc 1 315 8 is_stmt 0 discriminator 2 view .LVU262
+ 878 00ec 8091 0000 		lds r24,ibuf
+ 879 00f0 9091 0000 		lds r25,ibuf+1
+ 880 00f4 0296      		adiw r24,2
+ 881 00f6 00C0      		rjmp .L78
+ 882               	.L60:
+ 313:main.c        **** 		OCR0B = cbuf ? buf1[ibuf + 1] : buf0[ibuf + 1];
+ 883               		.loc 1 313 9 discriminator 2 view .LVU263
+ 884 00f8 8050      		subi r24,lo8(-(buf0))
+ 885 00fa 9040      		sbci r25,hi8(-(buf0))
+ 886 00fc 00C0      		rjmp .L73
+ 887               	.L62:
+ 314:main.c        **** 		ibuf += 2;
+ 888               		.loc 1 314 9 discriminator 2 view .LVU264
+ 889 00fe 8050      		subi r24,lo8(-(buf0))
+ 890 0100 9040      		sbci r25,hi8(-(buf0))
+ 891 0102 00C0      		rjmp .L74
+ 892               		__gcc_isr 0,r18
+ 893               		.cfi_endproc
+ 894               	.LFE10:
+ 896               		.local	ibuf
+ 897               		.comm	ibuf,2,1
+ 898               		.local	cbuf
+ 899               		.comm	cbuf,1,1
+ 900               		.local	flag
+ 901               		.comm	flag,1,1
+ 902               		.local	max
+ 903               		.comm	max,4,1
+ 904               		.local	buf1
+ 905               		.comm	buf1,512,1
+ 906               		.local	buf0
+ 907               		.comm	buf0,512,1
+ 908               		.local	wi
+ 909               		.comm	wi,8,1
+ 910               		.section	.rodata
+ 913               	sample_rates:
+ 914 0000 40        		.byte	64
+ 915 0001 1F        		.byte	31
+ 916 0002 00        		.byte	0
+ 917 0003 00        		.byte	0
+ 918 0004 FA        		.byte	-6
+ 919 0005 11        		.byte	17
+ 920 0006 2B        		.byte	43
+ 921 0007 00        		.byte	0
+ 922 0008 00        		.byte	0
+ 923 0009 B5        		.byte	-75
+ 924 000a 80        		.byte	-128
+ 925 000b 3E        		.byte	62
+ 926 000c 00        		.byte	0
+ 927 000d 00        		.byte	0
+ 928 000e 7D        		.byte	125
+ 929 000f 22        		.byte	34
+ 930 0010 56        		.byte	86
+ 931 0011 00        		.byte	0
+ 932 0012 00        		.byte	0
+ 933 0013 5B        		.byte	91
+ 934 0014 C0        		.byte	-64
+ 935 0015 5D        		.byte	93
+ 936 0016 00        		.byte	0
+ 937 0017 00        		.byte	0
+ 938 0018 53        		.byte	83
+ 939 0019 00        		.byte	0
+ 940 001a 7D        		.byte	125
+ 941 001b 00        		.byte	0
+ 942 001c 00        		.byte	0
+ 943 001d 3F        		.byte	63
+ 944 001e 44        		.byte	68
+ 945 001f AC        		.byte	-84
+ 946 0020 00        		.byte	0
+ 947 0021 00        		.byte	0
+ 948 0022 2D        		.byte	45
+ 949 0023 80        		.byte	-128
+ 950 0024 BB        		.byte	-69
+ 951 0025 00        		.byte	0
+ 952 0026 00        		.byte	0
+ 953 0027 2A        		.byte	42
+ 954               		.text
+ 955               	.Letext0:
+ 956               		.file 3 "/usr/avr/include/stdint.h"
+ 957               		.file 4 "fat.h"
+ 958               		.file 5 "util.h"
+ 959               		.file 6 "sd.h"
+DEFINED SYMBOLS
+                            *ABS*:0000000000000000 main.c
+     /tmp/ccep9R7s.s:2      *ABS*:000000000000003e __SP_H__
+     /tmp/ccep9R7s.s:3      *ABS*:000000000000003d __SP_L__
+     /tmp/ccep9R7s.s:4      *ABS*:000000000000003f __SREG__
+     /tmp/ccep9R7s.s:5      *ABS*:0000000000000000 __tmp_reg__
+     /tmp/ccep9R7s.s:6      *ABS*:0000000000000001 __zero_reg__
+     /tmp/ccep9R7s.s:11     .text:0000000000000000 error
+     /tmp/ccep9R7s.s:80     .text.startup:0000000000000000 main
+     /tmp/ccep9R7s.s:905    .bss:0000000000000208 buf0
+     /tmp/ccep9R7s.s:907    .bss:0000000000000408 wi
+     /tmp/ccep9R7s.s:913    .rodata:0000000000000000 sample_rates
+     /tmp/ccep9R7s.s:901    .bss:0000000000000004 max
+                             .bss:0000000000000000 ibuf
+     /tmp/ccep9R7s.s:899    .bss:0000000000000003 flag
+     /tmp/ccep9R7s.s:897    .bss:0000000000000002 cbuf
+     /tmp/ccep9R7s.s:903    .bss:0000000000000008 buf1
+     /tmp/ccep9R7s.s:725    .text:0000000000000028 __vector_7
+                            *ABS*:0000000000000003 __gcc_isr.n_pushed.001
+
+UNDEFINED SYMBOLS
+sd_init
+fat_mount
+fat_opendir
+fat_readdir
+fat_fopen
+fat_fread
+mem_cmp
+ld_u32
+ld_u16
+mem_mem
+fat_fseek
+__do_copy_data
+__do_clear_bss

@@ -1,0 +1,4082 @@
+   1               		.file	"fat.c"
+   2               	__SP_H__ = 0x3e
+   3               	__SP_L__ = 0x3d
+   4               	__SREG__ = 0x3f
+   5               	__tmp_reg__ = 0
+   6               	__zero_reg__ = 1
+   7               		.text
+   8               	.Ltext0:
+   9               		.cfi_sections	.debug_frame
+  11               	clust2sect:
+  12               	.LVL0:
+  13               	.LFB1:
+  14               		.file 1 "fat.c"
+   1:fat.c         **** #include "sd.h"
+   2:fat.c         **** #include "fat.h"
+   3:fat.c         **** #include "util.h"
+   4:fat.c         **** 
+   5:fat.c         **** #define BPB_SECTORS_PER_CLUSTER   13
+   6:fat.c         **** #define BPB_RESERVED_SECTOR_COUNT 14
+   7:fat.c         **** #define PBP_NUM_FATS              16
+   8:fat.c         **** #define PBP_ROOT_ENTRY_COUNT      17
+   9:fat.c         **** #define BPB_FAT_SIZE_16           22
+  10:fat.c         **** #define BPB_FAT_SIZE_32           36
+  11:fat.c         **** #define BPB_TOTAL_SECTORS_16      19
+  12:fat.c         **** #define BPB_TOTAL_SECTORS_32      32
+  13:fat.c         **** #define BPB_ROOT_CLUSTER          44
+  14:fat.c         **** #define BS_FILESYSTEM_TYPE        54
+  15:fat.c         **** #define BS_FILESYSTEM_TYPE_32     82
+  16:fat.c         **** #define MBR_TABLE                446
+  17:fat.c         **** #define DIR_NAME                   0
+  18:fat.c         **** #define DIR_ATTR                  11
+  19:fat.c         **** #define DIR_CLUSTER_HI            20
+  20:fat.c         **** #define DIR_CLUSTER_LO            26
+  21:fat.c         **** #define DIR_FILESIZE              28
+  22:fat.c         **** #define AM_VOL                      0x08
+  23:fat.c         **** #define AM_DIR                      0x10
+  24:fat.c         **** #define AM_MASK                     0x3F
+  25:fat.c         **** 
+  26:fat.c         **** struct
+  27:fat.c         **** {
+  28:fat.c         **** 	uint8_t csize;
+  29:fat.c         **** 	uint16_t n_rootdir;
+  30:fat.c         **** 	uint32_t n_fatent;
+  31:fat.c         **** 	uint32_t fatbase;
+  32:fat.c         **** 	uint32_t dirbase;
+  33:fat.c         **** 	uint32_t database;
+  34:fat.c         **** 	uint32_t org_clust;
+  35:fat.c         **** 	uint32_t curr_clust;
+  36:fat.c         **** 	uint32_t dsect;
+  37:fat.c         **** } static _fs;
+  38:fat.c         **** 
+  39:fat.c         **** uint32_t fat_fsize;
+  40:fat.c         **** uint32_t fat_ftell;
+  41:fat.c         **** 
+  42:fat.c         **** static uint32_t get_fat(uint32_t cluster)
+  43:fat.c         **** {
+  44:fat.c         **** 	uint8_t buf[4];
+  45:fat.c         **** 	if(cluster < 2 || cluster >= _fs.n_fatent)
+  46:fat.c         **** 	{
+  47:fat.c         **** 		return 1;
+  48:fat.c         **** 	}
+  49:fat.c         **** 
+  50:fat.c         **** 	if(sd_read(buf, _fs.fatbase + cluster / 128,
+  51:fat.c         **** 		((uint16_t)cluster % 128) * 4, 4))
+  52:fat.c         **** 	{
+  53:fat.c         **** 		return 1;
+  54:fat.c         **** 	}
+  55:fat.c         **** 
+  56:fat.c         **** 	return ld_u32(buf) & 0x0FFFFFFF;
+  57:fat.c         **** }
+  58:fat.c         **** 
+  59:fat.c         **** static uint32_t clust2sect(uint32_t cluster)
+  60:fat.c         **** {
+  15               		.loc 1 60 1 view -0
+  16               		.cfi_startproc
+  17               		.loc 1 60 1 is_stmt 0 view .LVU1
+  18 0000 CF93      		push r28
+  19               	.LCFI0:
+  20               		.cfi_def_cfa_offset 3
+  21               		.cfi_offset 28, -2
+  22 0002 DF93      		push r29
+  23               	.LCFI1:
+  24               		.cfi_def_cfa_offset 4
+  25               		.cfi_offset 29, -3
+  26 0004 00D0      		rcall .
+  27 0006 00D0      		rcall .
+  28               	.LCFI2:
+  29               		.cfi_def_cfa_offset 8
+  30 0008 CDB7      		in r28,__SP_L__
+  31 000a DEB7      		in r29,__SP_H__
+  32               	.LCFI3:
+  33               		.cfi_def_cfa_register 28
+  34               	/* prologue: function */
+  35               	/* frame size = 4 */
+  36               	/* stack size = 6 */
+  37               	.L__stack_usage = 6
+  61:fat.c         **** 	cluster -= 2;
+  38               		.loc 1 61 2 is_stmt 1 view .LVU2
+  39               		.loc 1 61 10 is_stmt 0 view .LVU3
+  40 000c 9B01      		movw r18,r22
+  41 000e AC01      		movw r20,r24
+  42 0010 2250      		subi r18,2
+  43 0012 3109      		sbc r19,__zero_reg__
+  44 0014 4109      		sbc r20,__zero_reg__
+  45 0016 5109      		sbc r21,__zero_reg__
+  46               	.LVL1:
+  62:fat.c         **** 	if(cluster >= (_fs.n_fatent - 2))
+  47               		.loc 1 62 2 is_stmt 1 view .LVU4
+  48               		.loc 1 62 30 is_stmt 0 view .LVU5
+  49 0018 8091 0000 		lds r24,_fs+3
+  50 001c 9091 0000 		lds r25,_fs+3+1
+  51 0020 A091 0000 		lds r26,_fs+3+2
+  52 0024 B091 0000 		lds r27,_fs+3+3
+  53 0028 0297      		sbiw r24,2
+  54 002a A109      		sbc r26,__zero_reg__
+  55 002c B109      		sbc r27,__zero_reg__
+  56               		.loc 1 62 4 view .LVU6
+  57 002e 2817      		cp r18,r24
+  58 0030 3907      		cpc r19,r25
+  59 0032 4A07      		cpc r20,r26
+  60 0034 5B07      		cpc r21,r27
+  61 0036 00F4      		brsh .L3
+  63:fat.c         **** 	{
+  64:fat.c         **** 		return 0;
+  65:fat.c         **** 	}
+  66:fat.c         **** 
+  67:fat.c         **** 	return cluster * _fs.csize + _fs.database;
+  62               		.loc 1 67 2 is_stmt 1 view .LVU7
+  63               		.loc 1 67 22 is_stmt 0 view .LVU8
+  64 0038 A091 0000 		lds r26,_fs
+  65               		.loc 1 67 17 view .LVU9
+  66 003c B0E0      		ldi r27,0
+  67 003e 0E94 0000 		call __muluhisi3
+  68 0042 6983      		std Y+1,r22
+  69 0044 7A83      		std Y+2,r23
+  70 0046 8B83      		std Y+3,r24
+  71 0048 9C83      		std Y+4,r25
+  72               		.loc 1 67 29 view .LVU10
+  73 004a 8091 0000 		lds r24,_fs+15
+  74 004e 9091 0000 		lds r25,_fs+15+1
+  75 0052 A091 0000 		lds r26,_fs+15+2
+  76 0056 B091 0000 		lds r27,_fs+15+3
+  77 005a 2981      		ldd r18,Y+1
+  78 005c 3A81      		ldd r19,Y+2
+  79 005e 4B81      		ldd r20,Y+3
+  80 0060 5C81      		ldd r21,Y+4
+  81               	.LVL2:
+  82               		.loc 1 67 29 view .LVU11
+  83 0062 280F      		add r18,r24
+  84 0064 391F      		adc r19,r25
+  85 0066 4A1F      		adc r20,r26
+  86 0068 5B1F      		adc r21,r27
+  87 006a 2983      		std Y+1,r18
+  88 006c 3A83      		std Y+2,r19
+  89 006e 4B83      		std Y+3,r20
+  90 0070 5C83      		std Y+4,r21
+  91               	.L1:
+  68:fat.c         **** }
+  92               		.loc 1 68 1 view .LVU12
+  93 0072 6981      		ldd r22,Y+1
+  94 0074 7A81      		ldd r23,Y+2
+  95 0076 8B81      		ldd r24,Y+3
+  96 0078 9C81      		ldd r25,Y+4
+  97               	/* epilogue start */
+  98 007a 0F90      		pop __tmp_reg__
+  99 007c 0F90      		pop __tmp_reg__
+ 100 007e 0F90      		pop __tmp_reg__
+ 101 0080 0F90      		pop __tmp_reg__
+ 102 0082 DF91      		pop r29
+ 103 0084 CF91      		pop r28
+ 104 0086 0895      		ret
+ 105               	.LVL3:
+ 106               	.L3:
+  64:fat.c         **** 	}
+ 107               		.loc 1 64 10 view .LVU13
+ 108 0088 1982      		std Y+1,__zero_reg__
+ 109 008a 1A82      		std Y+2,__zero_reg__
+ 110 008c 1B82      		std Y+3,__zero_reg__
+ 111 008e 1C82      		std Y+4,__zero_reg__
+ 112 0090 00C0      		rjmp .L1
+ 113               		.cfi_endproc
+ 114               	.LFE1:
+ 117               	dir_rewind:
+ 118               	.LVL4:
+ 119               	.LFB4:
+  69:fat.c         **** 
+  70:fat.c         **** static uint32_t get_cluster(uint8_t *dir)
+  71:fat.c         **** {
+  72:fat.c         **** 	uint32_t cluster;
+  73:fat.c         **** 	cluster = ld_u16(dir + DIR_CLUSTER_HI);
+  74:fat.c         **** 	cluster <<= 16;
+  75:fat.c         **** 	cluster |= ld_u16(dir + DIR_CLUSTER_LO);
+  76:fat.c         **** 	return cluster;
+  77:fat.c         **** }
+  78:fat.c         **** 
+  79:fat.c         **** static uint8_t create_name(dir_t *dj, const char **path)
+  80:fat.c         **** {
+  81:fat.c         **** 	uint8_t c, ni, si, i, *sfn;
+  82:fat.c         **** 	const char *p;
+  83:fat.c         **** 	sfn = dj->fn;
+  84:fat.c         **** 	mem_set(sfn, ' ', 11);
+  85:fat.c         **** 	si = 0;
+  86:fat.c         **** 	i = 0;
+  87:fat.c         **** 	ni = 8;
+  88:fat.c         **** 	p = *path;
+  89:fat.c         **** 	for(;;)
+  90:fat.c         **** 	{
+  91:fat.c         **** 		c = p[si++];
+  92:fat.c         **** 		if(c <= ' ' || c == '/')
+  93:fat.c         **** 		{
+  94:fat.c         **** 			break;
+  95:fat.c         **** 		}
+  96:fat.c         **** 
+  97:fat.c         **** 		if (c == '.' || i >= ni)
+  98:fat.c         **** 		{
+  99:fat.c         **** 			if(ni != 8 || c != '.')
+ 100:fat.c         **** 			{
+ 101:fat.c         **** 				break;
+ 102:fat.c         **** 			}
+ 103:fat.c         **** 
+ 104:fat.c         **** 			i = 8;
+ 105:fat.c         **** 			ni = 11;
+ 106:fat.c         **** 			continue;
+ 107:fat.c         **** 		}
+ 108:fat.c         **** 
+ 109:fat.c         **** 		/* Convert character to uppercase */
+ 110:fat.c         **** 		if(c >= 'a' && c <= 'z')
+ 111:fat.c         **** 		{
+ 112:fat.c         **** 			c -= 'a' - 'A';
+ 113:fat.c         **** 		}
+ 114:fat.c         **** 
+ 115:fat.c         **** 		sfn[i++] = c;
+ 116:fat.c         **** 	}
+ 117:fat.c         **** 
+ 118:fat.c         **** 	*path = &p[si];
+ 119:fat.c         **** 	sfn[11] = (c <= ' ');
+ 120:fat.c         **** 	return 0;
+ 121:fat.c         **** }
+ 122:fat.c         **** 
+ 123:fat.c         **** static uint8_t dir_rewind(dir_t *dj)
+ 124:fat.c         **** {
+ 120               		.loc 1 124 1 is_stmt 1 view -0
+ 121               		.cfi_startproc
+ 122               		.loc 1 124 1 is_stmt 0 view .LVU15
+ 123 0092 0F93      		push r16
+ 124               	.LCFI4:
+ 125               		.cfi_def_cfa_offset 3
+ 126               		.cfi_offset 16, -2
+ 127 0094 1F93      		push r17
+ 128               	.LCFI5:
+ 129               		.cfi_def_cfa_offset 4
+ 130               		.cfi_offset 17, -3
+ 131 0096 CF93      		push r28
+ 132               	.LCFI6:
+ 133               		.cfi_def_cfa_offset 5
+ 134               		.cfi_offset 28, -4
+ 135 0098 DF93      		push r29
+ 136               	.LCFI7:
+ 137               		.cfi_def_cfa_offset 6
+ 138               		.cfi_offset 29, -5
+ 139               	/* prologue: function */
+ 140               	/* frame size = 0 */
+ 141               	/* stack size = 4 */
+ 142               	.L__stack_usage = 4
+ 143 009a EC01      		movw r28,r24
+ 125:fat.c         **** 	uint32_t cluster;
+ 144               		.loc 1 125 2 is_stmt 1 view .LVU16
+ 126:fat.c         **** 	dj->index = 0;
+ 145               		.loc 1 126 2 view .LVU17
+ 146               		.loc 1 126 12 is_stmt 0 view .LVU18
+ 147 009c 1982      		std Y+1,__zero_reg__
+ 148 009e 1882      		st Y,__zero_reg__
+ 127:fat.c         **** 	cluster = dj->sclust;
+ 149               		.loc 1 127 2 is_stmt 1 view .LVU19
+ 150               		.loc 1 127 10 is_stmt 0 view .LVU20
+ 151 00a0 6C81      		ldd r22,Y+4
+ 152 00a2 7D81      		ldd r23,Y+5
+ 153 00a4 8E81      		ldd r24,Y+6
+ 154 00a6 9F81      		ldd r25,Y+7
+ 155               	.LVL5:
+ 128:fat.c         **** 	if(cluster == 1 || cluster >= _fs.n_fatent)
+ 156               		.loc 1 128 2 is_stmt 1 view .LVU21
+ 157               		.loc 1 128 4 is_stmt 0 view .LVU22
+ 158 00a8 6130      		cpi r22,1
+ 159 00aa 7105      		cpc r23,__zero_reg__
+ 160 00ac 8105      		cpc r24,__zero_reg__
+ 161 00ae 9105      		cpc r25,__zero_reg__
+ 162 00b0 01F0      		breq .L8
+ 163               		.loc 1 128 18 discriminator 1 view .LVU23
+ 164 00b2 0091 0000 		lds r16,_fs+3
+ 165 00b6 1091 0000 		lds r17,_fs+3+1
+ 166 00ba 2091 0000 		lds r18,_fs+3+2
+ 167 00be 3091 0000 		lds r19,_fs+3+3
+ 168 00c2 6017      		cp r22,r16
+ 169 00c4 7107      		cpc r23,r17
+ 170 00c6 8207      		cpc r24,r18
+ 171 00c8 9307      		cpc r25,r19
+ 172 00ca 00F4      		brsh .L8
+ 129:fat.c         **** 	{
+ 130:fat.c         **** 		return 1;
+ 131:fat.c         **** 	}
+ 132:fat.c         **** 
+ 133:fat.c         **** 	if(!cluster)
+ 173               		.loc 1 133 2 is_stmt 1 view .LVU24
+ 174               		.loc 1 133 4 is_stmt 0 view .LVU25
+ 175 00cc 6115      		cp r22,__zero_reg__
+ 176 00ce 7105      		cpc r23,__zero_reg__
+ 177 00d0 8105      		cpc r24,__zero_reg__
+ 178 00d2 9105      		cpc r25,__zero_reg__
+ 179 00d4 01F4      		brne .L6
+ 134:fat.c         **** 	{
+ 135:fat.c         **** 		cluster = (uint32_t)_fs.dirbase;
+ 180               		.loc 1 135 3 is_stmt 1 view .LVU26
+ 181               		.loc 1 135 11 is_stmt 0 view .LVU27
+ 182 00d6 6091 0000 		lds r22,_fs+11
+ 183 00da 7091 0000 		lds r23,_fs+11+1
+ 184 00de 8091 0000 		lds r24,_fs+11+2
+ 185 00e2 9091 0000 		lds r25,_fs+11+3
+ 186               	.LVL6:
+ 187               	.L6:
+ 136:fat.c         **** 	}
+ 137:fat.c         **** 
+ 138:fat.c         **** 	dj->clust = cluster;
+ 188               		.loc 1 138 2 is_stmt 1 view .LVU28
+ 189               		.loc 1 138 12 is_stmt 0 view .LVU29
+ 190 00e6 6887      		std Y+8,r22
+ 191 00e8 7987      		std Y+9,r23
+ 192 00ea 8A87      		std Y+10,r24
+ 193 00ec 9B87      		std Y+11,r25
+ 139:fat.c         **** 	dj->sect = clust2sect(cluster);
+ 194               		.loc 1 139 2 is_stmt 1 view .LVU30
+ 195               		.loc 1 139 13 is_stmt 0 view .LVU31
+ 196 00ee 0E94 0000 		call clust2sect
+ 197               	.LVL7:
+ 198               		.loc 1 139 13 view .LVU32
+ 199 00f2 6C87      		std Y+12,r22
+ 200 00f4 7D87      		std Y+13,r23
+ 201 00f6 8E87      		std Y+14,r24
+ 202 00f8 9F87      		std Y+15,r25
+ 140:fat.c         **** 	return 0;
+ 203               		.loc 1 140 2 is_stmt 1 view .LVU33
+ 204               		.loc 1 140 9 is_stmt 0 view .LVU34
+ 205 00fa 80E0      		ldi r24,0
+ 206               	.L4:
+ 207               	/* epilogue start */
+ 141:fat.c         **** }
+ 208               		.loc 1 141 1 view .LVU35
+ 209 00fc DF91      		pop r29
+ 210 00fe CF91      		pop r28
+ 211               	.LVL8:
+ 212               		.loc 1 141 1 view .LVU36
+ 213 0100 1F91      		pop r17
+ 214 0102 0F91      		pop r16
+ 215 0104 0895      		ret
+ 216               	.LVL9:
+ 217               	.L8:
+ 130:fat.c         **** 	}
+ 218               		.loc 1 130 10 view .LVU37
+ 219 0106 81E0      		ldi r24,lo8(1)
+ 220               	.LVL10:
+ 130:fat.c         **** 	}
+ 221               		.loc 1 130 10 view .LVU38
+ 222 0108 00C0      		rjmp .L4
+ 223               		.cfi_endproc
+ 224               	.LFE4:
+ 227               	get_cluster:
+ 228               	.LVL11:
+ 229               	.LFB2:
+  71:fat.c         **** 	uint32_t cluster;
+ 230               		.loc 1 71 1 is_stmt 1 view -0
+ 231               		.cfi_startproc
+  71:fat.c         **** 	uint32_t cluster;
+ 232               		.loc 1 71 1 is_stmt 0 view .LVU40
+ 233 010a CF92      		push r12
+ 234               	.LCFI8:
+ 235               		.cfi_def_cfa_offset 3
+ 236               		.cfi_offset 12, -2
+ 237 010c DF92      		push r13
+ 238               	.LCFI9:
+ 239               		.cfi_def_cfa_offset 4
+ 240               		.cfi_offset 13, -3
+ 241 010e EF92      		push r14
+ 242               	.LCFI10:
+ 243               		.cfi_def_cfa_offset 5
+ 244               		.cfi_offset 14, -4
+ 245 0110 FF92      		push r15
+ 246               	.LCFI11:
+ 247               		.cfi_def_cfa_offset 6
+ 248               		.cfi_offset 15, -5
+ 249 0112 CF93      		push r28
+ 250               	.LCFI12:
+ 251               		.cfi_def_cfa_offset 7
+ 252               		.cfi_offset 28, -6
+ 253 0114 DF93      		push r29
+ 254               	.LCFI13:
+ 255               		.cfi_def_cfa_offset 8
+ 256               		.cfi_offset 29, -7
+ 257 0116 00D0      		rcall .
+ 258 0118 00D0      		rcall .
+ 259               	.LCFI14:
+ 260               		.cfi_def_cfa_offset 12
+ 261 011a CDB7      		in r28,__SP_L__
+ 262 011c DEB7      		in r29,__SP_H__
+ 263               	.LCFI15:
+ 264               		.cfi_def_cfa_register 28
+ 265               	/* prologue: function */
+ 266               	/* frame size = 4 */
+ 267               	/* stack size = 10 */
+ 268               	.L__stack_usage = 10
+ 269 011e 8983      		std Y+1,r24
+ 270 0120 9A83      		std Y+2,r25
+  72:fat.c         **** 	cluster = ld_u16(dir + DIR_CLUSTER_HI);
+ 271               		.loc 1 72 2 is_stmt 1 view .LVU41
+  73:fat.c         **** 	cluster <<= 16;
+ 272               		.loc 1 73 2 view .LVU42
+  73:fat.c         **** 	cluster <<= 16;
+ 273               		.loc 1 73 12 is_stmt 0 view .LVU43
+ 274 0122 8981      		ldd r24,Y+1
+ 275 0124 9A81      		ldd r25,Y+2
+ 276               	.LVL12:
+  73:fat.c         **** 	cluster <<= 16;
+ 277               		.loc 1 73 12 view .LVU44
+ 278 0126 4496      		adiw r24,20
+ 279 0128 0E94 0000 		call ld_u16
+ 280               	.LVL13:
+  73:fat.c         **** 	cluster <<= 16;
+ 281               		.loc 1 73 10 view .LVU45
+ 282 012c B0E0      		ldi r27,0
+ 283 012e A0E0      		ldi r26,0
+ 284               	.LVL14:
+  74:fat.c         **** 	cluster |= ld_u16(dir + DIR_CLUSTER_LO);
+ 285               		.loc 1 74 2 is_stmt 1 view .LVU46
+  74:fat.c         **** 	cluster |= ld_u16(dir + DIR_CLUSTER_LO);
+ 286               		.loc 1 74 10 is_stmt 0 view .LVU47
+ 287 0130 7C01      		movw r14,r24
+ 288 0132 DD24      		clr r13
+ 289 0134 CC24      		clr r12
+ 290               	.LVL15:
+  75:fat.c         **** 	return cluster;
+ 291               		.loc 1 75 2 is_stmt 1 view .LVU48
+  75:fat.c         **** 	return cluster;
+ 292               		.loc 1 75 13 is_stmt 0 view .LVU49
+ 293 0136 8981      		ldd r24,Y+1
+ 294 0138 9A81      		ldd r25,Y+2
+ 295 013a 4A96      		adiw r24,26
+ 296 013c 0E94 0000 		call ld_u16
+ 297               	.LVL16:
+  76:fat.c         **** }
+ 298               		.loc 1 76 2 is_stmt 1 view .LVU50
+  75:fat.c         **** 	return cluster;
+ 299               		.loc 1 75 13 is_stmt 0 view .LVU51
+ 300 0140 B0E0      		ldi r27,0
+ 301 0142 A0E0      		ldi r26,0
+  75:fat.c         **** 	return cluster;
+ 302               		.loc 1 75 10 view .LVU52
+ 303 0144 9C01      		movw r18,r24
+ 304 0146 AD01      		movw r20,r26
+ 305 0148 2C29      		or r18,r12
+ 306 014a 3D29      		or r19,r13
+ 307 014c 4E29      		or r20,r14
+ 308 014e 5F29      		or r21,r15
+  77:fat.c         **** 
+ 309               		.loc 1 77 1 view .LVU53
+ 310 0150 CA01      		movw r24,r20
+ 311               	.LVL17:
+  77:fat.c         **** 
+ 312               		.loc 1 77 1 view .LVU54
+ 313 0152 B901      		movw r22,r18
+ 314               	/* epilogue start */
+ 315 0154 0F90      		pop __tmp_reg__
+ 316 0156 0F90      		pop __tmp_reg__
+ 317 0158 0F90      		pop __tmp_reg__
+ 318 015a 0F90      		pop __tmp_reg__
+ 319 015c DF91      		pop r29
+ 320 015e CF91      		pop r28
+ 321 0160 FF90      		pop r15
+ 322 0162 EF90      		pop r14
+ 323 0164 DF90      		pop r13
+ 324 0166 CF90      		pop r12
+ 325 0168 0895      		ret
+ 326               		.cfi_endproc
+ 327               	.LFE2:
+ 330               	get_fat:
+ 331               	.LVL18:
+ 332               	.LFB0:
+  43:fat.c         **** 	uint8_t buf[4];
+ 333               		.loc 1 43 1 is_stmt 1 view -0
+ 334               		.cfi_startproc
+  43:fat.c         **** 	uint8_t buf[4];
+ 335               		.loc 1 43 1 is_stmt 0 view .LVU56
+ 336 016a 0F93      		push r16
+ 337               	.LCFI16:
+ 338               		.cfi_def_cfa_offset 3
+ 339               		.cfi_offset 16, -2
+ 340 016c 1F93      		push r17
+ 341               	.LCFI17:
+ 342               		.cfi_def_cfa_offset 4
+ 343               		.cfi_offset 17, -3
+ 344 016e CF93      		push r28
+ 345               	.LCFI18:
+ 346               		.cfi_def_cfa_offset 5
+ 347               		.cfi_offset 28, -4
+ 348 0170 DF93      		push r29
+ 349               	.LCFI19:
+ 350               		.cfi_def_cfa_offset 6
+ 351               		.cfi_offset 29, -5
+ 352 0172 CDB7      		in r28,__SP_L__
+ 353 0174 DEB7      		in r29,__SP_H__
+ 354               	.LCFI20:
+ 355               		.cfi_def_cfa_register 28
+ 356 0176 2897      		sbiw r28,8
+ 357               	.LCFI21:
+ 358               		.cfi_def_cfa_offset 14
+ 359 0178 0FB6      		in __tmp_reg__,__SREG__
+ 360 017a F894      		cli
+ 361 017c DEBF      		out __SP_H__,r29
+ 362 017e 0FBE      		out __SREG__,__tmp_reg__
+ 363 0180 CDBF      		out __SP_L__,r28
+ 364               	/* prologue: function */
+ 365               	/* frame size = 8 */
+ 366               	/* stack size = 12 */
+ 367               	.L__stack_usage = 12
+ 368 0182 462F      		mov r20,r22
+ 369 0184 572F      		mov r21,r23
+ 370 0186 BC01      		movw r22,r24
+ 371               	.LVL19:
+  44:fat.c         **** 	if(cluster < 2 || cluster >= _fs.n_fatent)
+ 372               		.loc 1 44 2 is_stmt 1 view .LVU57
+  45:fat.c         **** 	{
+ 373               		.loc 1 45 2 view .LVU58
+  45:fat.c         **** 	{
+ 374               		.loc 1 45 4 is_stmt 0 view .LVU59
+ 375 0188 4230      		cpi r20,2
+ 376 018a 5105      		cpc r21,__zero_reg__
+ 377 018c 6105      		cpc r22,__zero_reg__
+ 378 018e 7105      		cpc r23,__zero_reg__
+ 379 0190 00F4      		brsh .+2
+ 380 0192 00C0      		rjmp .L14
+  45:fat.c         **** 	{
+ 381               		.loc 1 45 17 discriminator 1 view .LVU60
+ 382 0194 8091 0000 		lds r24,_fs+3
+ 383 0198 9091 0000 		lds r25,_fs+3+1
+ 384 019c A091 0000 		lds r26,_fs+3+2
+ 385 01a0 B091 0000 		lds r27,_fs+3+3
+ 386 01a4 4817      		cp r20,r24
+ 387 01a6 5907      		cpc r21,r25
+ 388 01a8 6A07      		cpc r22,r26
+ 389 01aa 7B07      		cpc r23,r27
+ 390 01ac 00F4      		brsh .L14
+ 391               	.LVL20:
+ 392               	.LBB4:
+ 393               	.LBI4:
+  42:fat.c         **** {
+ 394               		.loc 1 42 17 is_stmt 1 view .LVU61
+ 395               	.LBB5:
+  50:fat.c         **** 		((uint16_t)cluster % 128) * 4, 4))
+ 396               		.loc 1 50 2 view .LVU62
+  51:fat.c         **** 	{
+ 397               		.loc 1 51 22 is_stmt 0 view .LVU63
+ 398 01ae 9A01      		movw r18,r20
+ 399 01b0 2F77      		andi r18,127
+ 400 01b2 3327      		clr r19
+  50:fat.c         **** 		((uint16_t)cluster % 128) * 4, 4))
+ 401               		.loc 1 50 5 view .LVU64
+ 402 01b4 220F      		lsl r18
+ 403 01b6 331F      		rol r19
+ 404 01b8 220F      		lsl r18
+ 405 01ba 331F      		rol r19
+  50:fat.c         **** 		((uint16_t)cluster % 128) * 4, 4))
+ 406               		.loc 1 50 40 view .LVU65
+ 407 01bc 97E0      		ldi r25,7
+ 408               		1:
+ 409 01be 7695      		lsr r23
+ 410 01c0 6795      		ror r22
+ 411 01c2 5795      		ror r21
+ 412 01c4 4795      		ror r20
+ 413 01c6 9A95      		dec r25
+ 414 01c8 01F4      		brne 1b
+ 415               	.LVL21:
+  50:fat.c         **** 		((uint16_t)cluster % 128) * 4, 4))
+ 416               		.loc 1 50 5 view .LVU66
+ 417 01ca 8091 0000 		lds r24,_fs+7
+ 418 01ce 9091 0000 		lds r25,_fs+7+1
+ 419 01d2 A091 0000 		lds r26,_fs+7+2
+ 420 01d6 B091 0000 		lds r27,_fs+7+3
+ 421 01da 480F      		add r20,r24
+ 422 01dc 591F      		adc r21,r25
+ 423 01de 6A1F      		adc r22,r26
+ 424 01e0 7B1F      		adc r23,r27
+ 425 01e2 04E0      		ldi r16,lo8(4)
+ 426 01e4 10E0      		ldi r17,0
+ 427 01e6 CE01      		movw r24,r28
+ 428 01e8 0196      		adiw r24,1
+ 429 01ea 0E94 0000 		call sd_read
+ 430               	.LVL22:
+  50:fat.c         **** 		((uint16_t)cluster % 128) * 4, 4))
+ 431               		.loc 1 50 4 view .LVU67
+ 432 01ee 8111      		cpse r24,__zero_reg__
+ 433 01f0 00C0      		rjmp .L14
+  56:fat.c         **** }
+ 434               		.loc 1 56 2 is_stmt 1 view .LVU68
+  56:fat.c         **** }
+ 435               		.loc 1 56 9 is_stmt 0 view .LVU69
+ 436 01f2 CE01      		movw r24,r28
+ 437 01f4 0196      		adiw r24,1
+ 438 01f6 0E94 0000 		call ld_u32
+ 439               	.LVL23:
+ 440 01fa DC01      		movw r26,r24
+ 441 01fc CB01      		movw r24,r22
+  56:fat.c         **** }
+ 442               		.loc 1 56 21 view .LVU70
+ 443 01fe BF70      		andi r27,15
+ 444               	.L16:
+  56:fat.c         **** }
+ 445               		.loc 1 56 21 view .LVU71
+ 446               	.LBE5:
+ 447               	.LBE4:
+  47:fat.c         **** 	}
+ 448               		.loc 1 47 10 view .LVU72
+ 449 0200 8D83      		std Y+5,r24
+ 450 0202 9E83      		std Y+6,r25
+ 451 0204 AF83      		std Y+7,r26
+ 452 0206 B887      		std Y+8,r27
+  57:fat.c         **** 
+ 453               		.loc 1 57 1 view .LVU73
+ 454 0208 6D81      		ldd r22,Y+5
+ 455 020a 7E81      		ldd r23,Y+6
+ 456 020c 8F81      		ldd r24,Y+7
+ 457 020e 9885      		ldd r25,Y+8
+ 458               	/* epilogue start */
+ 459 0210 2896      		adiw r28,8
+ 460 0212 0FB6      		in __tmp_reg__,__SREG__
+ 461 0214 F894      		cli
+ 462 0216 DEBF      		out __SP_H__,r29
+ 463 0218 0FBE      		out __SREG__,__tmp_reg__
+ 464 021a CDBF      		out __SP_L__,r28
+ 465 021c DF91      		pop r29
+ 466 021e CF91      		pop r28
+ 467 0220 1F91      		pop r17
+ 468 0222 0F91      		pop r16
+ 469 0224 0895      		ret
+ 470               	.L14:
+  47:fat.c         **** 	}
+ 471               		.loc 1 47 10 view .LVU74
+ 472 0226 81E0      		ldi r24,lo8(1)
+ 473 0228 90E0      		ldi r25,0
+ 474 022a A0E0      		ldi r26,0
+ 475 022c B0E0      		ldi r27,0
+ 476 022e 00C0      		rjmp .L16
+ 477               		.cfi_endproc
+ 478               	.LFE0:
+ 481               	dir_next:
+ 482               	.LVL24:
+ 483               	.LFB5:
+ 142:fat.c         **** 
+ 143:fat.c         **** static uint8_t dir_next(dir_t *dj)
+ 144:fat.c         **** {
+ 484               		.loc 1 144 1 is_stmt 1 view -0
+ 485               		.cfi_startproc
+ 486               		.loc 1 144 1 is_stmt 0 view .LVU76
+ 487 0230 CF92      		push r12
+ 488               	.LCFI22:
+ 489               		.cfi_def_cfa_offset 3
+ 490               		.cfi_offset 12, -2
+ 491 0232 DF92      		push r13
+ 492               	.LCFI23:
+ 493               		.cfi_def_cfa_offset 4
+ 494               		.cfi_offset 13, -3
+ 495 0234 EF92      		push r14
+ 496               	.LCFI24:
+ 497               		.cfi_def_cfa_offset 5
+ 498               		.cfi_offset 14, -4
+ 499 0236 FF92      		push r15
+ 500               	.LCFI25:
+ 501               		.cfi_def_cfa_offset 6
+ 502               		.cfi_offset 15, -5
+ 503 0238 0F93      		push r16
+ 504               	.LCFI26:
+ 505               		.cfi_def_cfa_offset 7
+ 506               		.cfi_offset 16, -6
+ 507 023a 1F93      		push r17
+ 508               	.LCFI27:
+ 509               		.cfi_def_cfa_offset 8
+ 510               		.cfi_offset 17, -7
+ 511 023c CF93      		push r28
+ 512               	.LCFI28:
+ 513               		.cfi_def_cfa_offset 9
+ 514               		.cfi_offset 28, -8
+ 515 023e DF93      		push r29
+ 516               	.LCFI29:
+ 517               		.cfi_def_cfa_offset 10
+ 518               		.cfi_offset 29, -9
+ 519 0240 CDB7      		in r28,__SP_L__
+ 520 0242 DEB7      		in r29,__SP_H__
+ 521               	.LCFI30:
+ 522               		.cfi_def_cfa_register 28
+ 523 0244 2A97      		sbiw r28,10
+ 524               	.LCFI31:
+ 525               		.cfi_def_cfa_offset 20
+ 526 0246 0FB6      		in __tmp_reg__,__SREG__
+ 527 0248 F894      		cli
+ 528 024a DEBF      		out __SP_H__,r29
+ 529 024c 0FBE      		out __SREG__,__tmp_reg__
+ 530 024e CDBF      		out __SP_L__,r28
+ 531               	/* prologue: function */
+ 532               	/* frame size = 10 */
+ 533               	/* stack size = 18 */
+ 534               	.L__stack_usage = 18
+ 535 0250 8D83      		std Y+5,r24
+ 536 0252 9E83      		std Y+6,r25
+ 145:fat.c         **** 	uint32_t clst;
+ 537               		.loc 1 145 2 is_stmt 1 view .LVU77
+ 146:fat.c         **** 	uint16_t i;
+ 538               		.loc 1 146 2 view .LVU78
+ 147:fat.c         **** 	if(!(i = dj->index + 1) || !dj->sect)
+ 539               		.loc 1 147 2 view .LVU79
+ 540               		.loc 1 147 9 is_stmt 0 view .LVU80
+ 541 0254 AD81      		ldd r26,Y+5
+ 542 0256 BE81      		ldd r27,Y+6
+ 543 0258 0D91      		ld r16,X+
+ 544 025a 1C91      		ld r17,X
+ 545 025c 0F5F      		subi r16,-1
+ 546 025e 1F4F      		sbci r17,-1
+ 547               	.LVL25:
+ 548               		.loc 1 147 4 view .LVU81
+ 549 0260 01F4      		brne .L18
+ 550               	.LVL26:
+ 551               	.L20:
+ 148:fat.c         **** 	{
+ 149:fat.c         **** 		return 1;
+ 552               		.loc 1 149 10 view .LVU82
+ 553 0262 81E0      		ldi r24,lo8(1)
+ 554               	.L17:
+ 555               	/* epilogue start */
+ 150:fat.c         **** 	}
+ 151:fat.c         **** 
+ 152:fat.c         **** 	if(!(i % 16))
+ 153:fat.c         **** 	{
+ 154:fat.c         **** 		dj->sect++;
+ 155:fat.c         **** 		if(dj->clust == 0)
+ 156:fat.c         **** 		{
+ 157:fat.c         **** 			if(i >= _fs.n_rootdir)
+ 158:fat.c         **** 			{
+ 159:fat.c         **** 				return 1;
+ 160:fat.c         **** 			}
+ 161:fat.c         **** 		}
+ 162:fat.c         **** 		else
+ 163:fat.c         **** 		{
+ 164:fat.c         **** 			if(((i / 16) & (_fs.csize - 1)) == 0)
+ 165:fat.c         **** 			{
+ 166:fat.c         **** 				clst = get_fat(dj->clust);
+ 167:fat.c         **** 				if(clst <= 1)
+ 168:fat.c         **** 				{
+ 169:fat.c         **** 					return 1;
+ 170:fat.c         **** 				}
+ 171:fat.c         **** 
+ 172:fat.c         **** 				if(clst >= _fs.n_fatent)
+ 173:fat.c         **** 				{
+ 174:fat.c         **** 					return 1;
+ 175:fat.c         **** 				}
+ 176:fat.c         **** 
+ 177:fat.c         **** 				dj->clust = clst;
+ 178:fat.c         **** 				dj->sect = clust2sect(clst);
+ 179:fat.c         **** 			}
+ 180:fat.c         **** 		}
+ 181:fat.c         **** 	}
+ 182:fat.c         **** 
+ 183:fat.c         **** 	dj->index = i;
+ 184:fat.c         **** 	return 0;
+ 185:fat.c         **** }
+ 556               		.loc 1 185 1 view .LVU83
+ 557 0264 2A96      		adiw r28,10
+ 558 0266 0FB6      		in __tmp_reg__,__SREG__
+ 559 0268 F894      		cli
+ 560 026a DEBF      		out __SP_H__,r29
+ 561 026c 0FBE      		out __SREG__,__tmp_reg__
+ 562 026e CDBF      		out __SP_L__,r28
+ 563 0270 DF91      		pop r29
+ 564 0272 CF91      		pop r28
+ 565 0274 1F91      		pop r17
+ 566 0276 0F91      		pop r16
+ 567               	.LVL27:
+ 568               		.loc 1 185 1 view .LVU84
+ 569 0278 FF90      		pop r15
+ 570 027a EF90      		pop r14
+ 571 027c DF90      		pop r13
+ 572 027e CF90      		pop r12
+ 573 0280 0895      		ret
+ 574               	.LVL28:
+ 575               	.L18:
+ 147:fat.c         **** 	{
+ 576               		.loc 1 147 32 discriminator 1 view .LVU85
+ 577 0282 ED81      		ldd r30,Y+5
+ 578 0284 FE81      		ldd r31,Y+6
+ 579 0286 8485      		ldd r24,Z+12
+ 580 0288 9585      		ldd r25,Z+13
+ 581 028a A685      		ldd r26,Z+14
+ 582 028c B785      		ldd r27,Z+15
+ 583               	.LVL29:
+ 147:fat.c         **** 	{
+ 584               		.loc 1 147 26 discriminator 1 view .LVU86
+ 585 028e 0097      		sbiw r24,0
+ 586 0290 A105      		cpc r26,__zero_reg__
+ 587 0292 B105      		cpc r27,__zero_reg__
+ 588 0294 01F0      		breq .L20
+ 152:fat.c         **** 	{
+ 589               		.loc 1 152 2 is_stmt 1 view .LVU87
+ 152:fat.c         **** 	{
+ 590               		.loc 1 152 9 is_stmt 0 view .LVU88
+ 591 0296 9801      		movw r18,r16
+ 592 0298 2F70      		andi r18,15
+ 593 029a 3327      		clr r19
+ 152:fat.c         **** 	{
+ 594               		.loc 1 152 4 view .LVU89
+ 595 029c 232B      		or r18,r19
+ 596 029e 01F4      		brne .L22
+ 154:fat.c         **** 		if(dj->clust == 0)
+ 597               		.loc 1 154 3 is_stmt 1 view .LVU90
+ 154:fat.c         **** 		if(dj->clust == 0)
+ 598               		.loc 1 154 11 is_stmt 0 view .LVU91
+ 599 02a0 0196      		adiw r24,1
+ 600 02a2 A11D      		adc r26,__zero_reg__
+ 601 02a4 B11D      		adc r27,__zero_reg__
+ 602 02a6 8487      		std Z+12,r24
+ 603 02a8 9587      		std Z+13,r25
+ 604 02aa A687      		std Z+14,r26
+ 605 02ac B787      		std Z+15,r27
+ 155:fat.c         **** 		{
+ 606               		.loc 1 155 3 is_stmt 1 view .LVU92
+ 155:fat.c         **** 		{
+ 607               		.loc 1 155 8 is_stmt 0 view .LVU93
+ 608 02ae 8085      		ldd r24,Z+8
+ 609 02b0 9185      		ldd r25,Z+9
+ 610 02b2 A285      		ldd r26,Z+10
+ 611 02b4 B385      		ldd r27,Z+11
+ 612 02b6 8983      		std Y+1,r24
+ 613 02b8 9A83      		std Y+2,r25
+ 614 02ba AB83      		std Y+3,r26
+ 615 02bc BC83      		std Y+4,r27
+ 155:fat.c         **** 		{
+ 616               		.loc 1 155 5 view .LVU94
+ 617 02be 892B      		or r24,r25
+ 618 02c0 8A2B      		or r24,r26
+ 619 02c2 8B2B      		or r24,r27
+ 620 02c4 01F4      		brne .L23
+ 157:fat.c         **** 			{
+ 621               		.loc 1 157 4 is_stmt 1 view .LVU95
+ 157:fat.c         **** 			{
+ 622               		.loc 1 157 6 is_stmt 0 view .LVU96
+ 623 02c6 8091 0000 		lds r24,_fs+1
+ 624 02ca 9091 0000 		lds r25,_fs+1+1
+ 625 02ce 0817      		cp r16,r24
+ 626 02d0 1907      		cpc r17,r25
+ 627 02d2 00F4      		brsh .L20
+ 628               	.L22:
+ 183:fat.c         **** 	return 0;
+ 629               		.loc 1 183 2 is_stmt 1 view .LVU97
+ 183:fat.c         **** 	return 0;
+ 630               		.loc 1 183 12 is_stmt 0 view .LVU98
+ 631 02d4 ED81      		ldd r30,Y+5
+ 632 02d6 FE81      		ldd r31,Y+6
+ 633 02d8 1183      		std Z+1,r17
+ 634 02da 0083      		st Z,r16
+ 184:fat.c         **** }
+ 635               		.loc 1 184 2 is_stmt 1 view .LVU99
+ 184:fat.c         **** }
+ 636               		.loc 1 184 9 is_stmt 0 view .LVU100
+ 637 02dc 80E0      		ldi r24,0
+ 638 02de 00C0      		rjmp .L17
+ 639               	.L23:
+ 164:fat.c         **** 			{
+ 640               		.loc 1 164 4 is_stmt 1 view .LVU101
+ 164:fat.c         **** 			{
+ 641               		.loc 1 164 23 is_stmt 0 view .LVU102
+ 642 02e0 8091 0000 		lds r24,_fs
+ 164:fat.c         **** 			{
+ 643               		.loc 1 164 30 view .LVU103
+ 644 02e4 8150      		subi r24,1
+ 645 02e6 990B      		sbc r25,r25
+ 164:fat.c         **** 			{
+ 646               		.loc 1 164 11 view .LVU104
+ 647 02e8 9801      		movw r18,r16
+ 648 02ea 44E0      		ldi r20,4
+ 649               		1:
+ 650 02ec 3695      		lsr r19
+ 651 02ee 2795      		ror r18
+ 652 02f0 4A95      		dec r20
+ 653 02f2 01F4      		brne 1b
+ 164:fat.c         **** 			{
+ 654               		.loc 1 164 17 view .LVU105
+ 655 02f4 8223      		and r24,r18
+ 656 02f6 9323      		and r25,r19
+ 164:fat.c         **** 			{
+ 657               		.loc 1 164 6 view .LVU106
+ 658 02f8 892B      		or r24,r25
+ 659 02fa 01F4      		brne .L22
+ 166:fat.c         **** 				if(clst <= 1)
+ 660               		.loc 1 166 5 is_stmt 1 view .LVU107
+ 166:fat.c         **** 				if(clst <= 1)
+ 661               		.loc 1 166 12 is_stmt 0 view .LVU108
+ 662 02fc 6981      		ldd r22,Y+1
+ 663 02fe 7A81      		ldd r23,Y+2
+ 664 0300 8B81      		ldd r24,Y+3
+ 665 0302 9C81      		ldd r25,Y+4
+ 666 0304 0E94 0000 		call get_fat
+ 667               	.LVL30:
+ 167:fat.c         **** 				{
+ 668               		.loc 1 167 5 is_stmt 1 view .LVU109
+ 167:fat.c         **** 				{
+ 669               		.loc 1 167 7 is_stmt 0 view .LVU110
+ 670 0308 6230      		cpi r22,2
+ 671 030a 7105      		cpc r23,__zero_reg__
+ 672 030c 8105      		cpc r24,__zero_reg__
+ 673 030e 9105      		cpc r25,__zero_reg__
+ 674 0310 00F4      		brsh .+2
+ 675 0312 00C0      		rjmp .L20
+ 172:fat.c         **** 				{
+ 676               		.loc 1 172 5 is_stmt 1 view .LVU111
+ 172:fat.c         **** 				{
+ 677               		.loc 1 172 7 is_stmt 0 view .LVU112
+ 678 0314 C090 0000 		lds r12,_fs+3
+ 679 0318 D090 0000 		lds r13,_fs+3+1
+ 680 031c E090 0000 		lds r14,_fs+3+2
+ 681 0320 F090 0000 		lds r15,_fs+3+3
+ 682 0324 6C15      		cp r22,r12
+ 683 0326 7D05      		cpc r23,r13
+ 684 0328 8E05      		cpc r24,r14
+ 685 032a 9F05      		cpc r25,r15
+ 686 032c 00F0      		brlo .+2
+ 687 032e 00C0      		rjmp .L20
+ 177:fat.c         **** 				dj->sect = clust2sect(clst);
+ 688               		.loc 1 177 5 is_stmt 1 view .LVU113
+ 177:fat.c         **** 				dj->sect = clust2sect(clst);
+ 689               		.loc 1 177 15 is_stmt 0 view .LVU114
+ 690 0330 ED81      		ldd r30,Y+5
+ 691 0332 FE81      		ldd r31,Y+6
+ 692 0334 6087      		std Z+8,r22
+ 693 0336 7187      		std Z+9,r23
+ 694 0338 8287      		std Z+10,r24
+ 695 033a 9387      		std Z+11,r25
+ 178:fat.c         **** 			}
+ 696               		.loc 1 178 5 is_stmt 1 view .LVU115
+ 178:fat.c         **** 			}
+ 697               		.loc 1 178 16 is_stmt 0 view .LVU116
+ 698 033c 0E94 0000 		call clust2sect
+ 699               	.LVL31:
+ 178:fat.c         **** 			}
+ 700               		.loc 1 178 14 view .LVU117
+ 701 0340 AD81      		ldd r26,Y+5
+ 702 0342 BE81      		ldd r27,Y+6
+ 703 0344 1C96      		adiw r26,12
+ 704 0346 6D93      		st X+,r22
+ 705 0348 7D93      		st X+,r23
+ 706 034a 8D93      		st X+,r24
+ 707 034c 9C93      		st X,r25
+ 708 034e 1F97      		sbiw r26,12+3
+ 709 0350 00C0      		rjmp .L22
+ 710               		.cfi_endproc
+ 711               	.LFE5:
+ 714               	check_fs:
+ 715               	.LVL32:
+ 716               	.LFB8:
+ 186:fat.c         **** 
+ 187:fat.c         **** static uint8_t dir_find(dir_t *dj, uint8_t *dir)
+ 188:fat.c         **** {
+ 189:fat.c         **** 	uint8_t res;
+ 190:fat.c         **** 	if((res = dir_rewind(dj)))
+ 191:fat.c         **** 	{
+ 192:fat.c         **** 		return res;
+ 193:fat.c         **** 	}
+ 194:fat.c         **** 
+ 195:fat.c         **** 	do
+ 196:fat.c         **** 	{
+ 197:fat.c         **** 		if((res = sd_read(dir, dj->sect, (dj->index % 16) * 32, 32)))
+ 198:fat.c         **** 		{
+ 199:fat.c         **** 			break;
+ 200:fat.c         **** 		}
+ 201:fat.c         **** 
+ 202:fat.c         **** 		if(dir[DIR_NAME] == 0)
+ 203:fat.c         **** 		{
+ 204:fat.c         **** 			res = 1;
+ 205:fat.c         **** 			break;
+ 206:fat.c         **** 		}
+ 207:fat.c         **** 
+ 208:fat.c         **** 		if(!(dir[DIR_ATTR] & AM_VOL) && mem_cmp(dir, dj->fn, 11))
+ 209:fat.c         **** 		{
+ 210:fat.c         **** 			break;
+ 211:fat.c         **** 		}
+ 212:fat.c         **** 
+ 213:fat.c         **** 		res = dir_next(dj);
+ 214:fat.c         **** 	} while(!res);
+ 215:fat.c         **** 	return res;
+ 216:fat.c         **** }
+ 217:fat.c         **** 
+ 218:fat.c         **** static uint8_t follow_path(dir_t *dj, uint8_t *dir, const char *path)
+ 219:fat.c         **** {
+ 220:fat.c         **** 	uint8_t res;
+ 221:fat.c         **** 	while(*path == ' ')
+ 222:fat.c         **** 	{
+ 223:fat.c         **** 		path++;
+ 224:fat.c         **** 	}
+ 225:fat.c         **** 
+ 226:fat.c         **** 	if(*path == '/')
+ 227:fat.c         **** 	{
+ 228:fat.c         **** 		path++;
+ 229:fat.c         **** 	}
+ 230:fat.c         **** 
+ 231:fat.c         **** 	dj->sclust = 0;
+ 232:fat.c         **** 	if((uint8_t)*path < ' ')
+ 233:fat.c         **** 	{
+ 234:fat.c         **** 		res = dir_rewind(dj);
+ 235:fat.c         **** 		dir[0] = 0;
+ 236:fat.c         **** 	}
+ 237:fat.c         **** 	else
+ 238:fat.c         **** 	{
+ 239:fat.c         **** 		for(;;)
+ 240:fat.c         **** 		{
+ 241:fat.c         **** 			if((res = create_name(dj, &path)))
+ 242:fat.c         **** 			{
+ 243:fat.c         **** 				break;
+ 244:fat.c         **** 			}
+ 245:fat.c         **** 
+ 246:fat.c         **** 			if((res = dir_find(dj, dir)))
+ 247:fat.c         **** 			{
+ 248:fat.c         **** 				break;
+ 249:fat.c         **** 			}
+ 250:fat.c         **** 
+ 251:fat.c         **** 			if(dj->fn[11])
+ 252:fat.c         **** 			{
+ 253:fat.c         **** 				break;
+ 254:fat.c         **** 			}
+ 255:fat.c         **** 
+ 256:fat.c         **** 			if(!(dir[DIR_ATTR] & AM_DIR))
+ 257:fat.c         **** 			{
+ 258:fat.c         **** 				res = 1;
+ 259:fat.c         **** 				break;
+ 260:fat.c         **** 			}
+ 261:fat.c         **** 
+ 262:fat.c         **** 			dj->sclust = get_cluster(dir);
+ 263:fat.c         **** 		}
+ 264:fat.c         **** 	}
+ 265:fat.c         **** 
+ 266:fat.c         **** 	return res;
+ 267:fat.c         **** }
+ 268:fat.c         **** 
+ 269:fat.c         **** static uint8_t check_fs(uint8_t *buf, uint32_t sect)
+ 270:fat.c         **** {
+ 717               		.loc 1 270 1 is_stmt 1 view -0
+ 718               		.cfi_startproc
+ 719               		.loc 1 270 1 is_stmt 0 view .LVU119
+ 720 0352 CF92      		push r12
+ 721               	.LCFI32:
+ 722               		.cfi_def_cfa_offset 3
+ 723               		.cfi_offset 12, -2
+ 724 0354 DF92      		push r13
+ 725               	.LCFI33:
+ 726               		.cfi_def_cfa_offset 4
+ 727               		.cfi_offset 13, -3
+ 728 0356 EF92      		push r14
+ 729               	.LCFI34:
+ 730               		.cfi_def_cfa_offset 5
+ 731               		.cfi_offset 14, -4
+ 732 0358 FF92      		push r15
+ 733               	.LCFI35:
+ 734               		.cfi_def_cfa_offset 6
+ 735               		.cfi_offset 15, -5
+ 736 035a 0F93      		push r16
+ 737               	.LCFI36:
+ 738               		.cfi_def_cfa_offset 7
+ 739               		.cfi_offset 16, -6
+ 740 035c 1F93      		push r17
+ 741               	.LCFI37:
+ 742               		.cfi_def_cfa_offset 8
+ 743               		.cfi_offset 17, -7
+ 744 035e CF93      		push r28
+ 745               	.LCFI38:
+ 746               		.cfi_def_cfa_offset 9
+ 747               		.cfi_offset 28, -8
+ 748 0360 DF93      		push r29
+ 749               	.LCFI39:
+ 750               		.cfi_def_cfa_offset 10
+ 751               		.cfi_offset 29, -9
+ 752               	/* prologue: function */
+ 753               	/* frame size = 0 */
+ 754               	/* stack size = 8 */
+ 755               	.L__stack_usage = 8
+ 756 0362 D82F      		mov r29,r24
+ 757 0364 C92F      		mov r28,r25
+ 758 0366 6A01      		movw r12,r20
+ 759 0368 7B01      		movw r14,r22
+ 271:fat.c         **** 	if(sd_read(buf, sect, 510, 2))
+ 760               		.loc 1 271 2 is_stmt 1 view .LVU120
+ 761               		.loc 1 271 5 is_stmt 0 view .LVU121
+ 762 036a 02E0      		ldi r16,lo8(2)
+ 763 036c 10E0      		ldi r17,0
+ 764 036e 2EEF      		ldi r18,lo8(-2)
+ 765 0370 31E0      		ldi r19,lo8(1)
+ 766 0372 0E94 0000 		call sd_read
+ 767               	.LVL33:
+ 768               		.loc 1 271 4 view .LVU122
+ 769 0376 8111      		cpse r24,__zero_reg__
+ 770 0378 00C0      		rjmp .L31
+ 272:fat.c         **** 	{
+ 273:fat.c         **** 		return 3;
+ 274:fat.c         **** 	}
+ 275:fat.c         **** 
+ 276:fat.c         **** 	if(ld_u16(buf) != 0xAA55)
+ 771               		.loc 1 276 2 is_stmt 1 view .LVU123
+ 772               		.loc 1 276 5 is_stmt 0 view .LVU124
+ 773 037a 8D2F      		mov r24,r29
+ 774 037c 9C2F      		mov r25,r28
+ 775 037e 0E94 0000 		call ld_u16
+ 776               	.LVL34:
+ 777               		.loc 1 276 4 view .LVU125
+ 778 0382 8535      		cpi r24,85
+ 779 0384 9A4A      		sbci r25,-86
+ 780 0386 01F4      		brne .L32
+ 277:fat.c         **** 	{
+ 278:fat.c         **** 		return 2;
+ 279:fat.c         **** 	}
+ 280:fat.c         **** 
+ 281:fat.c         **** 	if(!sd_read(buf, sect, BS_FILESYSTEM_TYPE_32, 2)
+ 781               		.loc 1 281 2 is_stmt 1 view .LVU126
+ 782               		.loc 1 281 6 is_stmt 0 view .LVU127
+ 783 0388 22E5      		ldi r18,lo8(82)
+ 784 038a 30E0      		ldi r19,0
+ 785 038c A601      		movw r20,r12
+ 786 038e B701      		movw r22,r14
+ 787 0390 8D2F      		mov r24,r29
+ 788 0392 9C2F      		mov r25,r28
+ 789 0394 0E94 0000 		call sd_read
+ 790               	.LVL35:
+ 791               		.loc 1 281 4 view .LVU128
+ 792 0398 8111      		cpse r24,__zero_reg__
+ 793 039a 00C0      		rjmp .L33
+ 794               	.LVL36:
+ 795               	.LBB8:
+ 796               	.LBI8:
+ 269:fat.c         **** {
+ 797               		.loc 1 269 16 is_stmt 1 view .LVU129
+ 798               	.LBB9:
+ 282:fat.c         **** 		&& ld_u16(buf) == 0x4146)
+ 799               		.loc 1 282 6 is_stmt 0 view .LVU130
+ 800 039c 8D2F      		mov r24,r29
+ 801 039e 9C2F      		mov r25,r28
+ 802 03a0 0E94 0000 		call ld_u16
+ 803               	.LVL37:
+ 804 03a4 9C01      		movw r18,r24
+ 805               		.loc 1 282 3 view .LVU131
+ 806 03a6 81E0      		ldi r24,lo8(1)
+ 807 03a8 2634      		cpi r18,70
+ 808 03aa 3144      		sbci r19,65
+ 809 03ac 01F4      		brne .L28
+ 810 03ae 80E0      		ldi r24,0
+ 811               	.LVL38:
+ 812               	.L28:
+ 813               	/* epilogue start */
+ 814               		.loc 1 282 3 view .LVU132
+ 815               	.LBE9:
+ 816               	.LBE8:
+ 283:fat.c         **** 	{
+ 284:fat.c         **** 		return 0;
+ 285:fat.c         **** 	}
+ 286:fat.c         **** 
+ 287:fat.c         **** 	return 1;
+ 288:fat.c         **** }
+ 817               		.loc 1 288 1 view .LVU133
+ 818 03b0 DF91      		pop r29
+ 819 03b2 CF91      		pop r28
+ 820 03b4 1F91      		pop r17
+ 821 03b6 0F91      		pop r16
+ 822 03b8 FF90      		pop r15
+ 823 03ba EF90      		pop r14
+ 824 03bc DF90      		pop r13
+ 825 03be CF90      		pop r12
+ 826 03c0 0895      		ret
+ 827               	.L31:
+ 273:fat.c         **** 	}
+ 828               		.loc 1 273 10 view .LVU134
+ 829 03c2 83E0      		ldi r24,lo8(3)
+ 830 03c4 00C0      		rjmp .L28
+ 831               	.L32:
+ 278:fat.c         **** 	}
+ 832               		.loc 1 278 10 view .LVU135
+ 833 03c6 82E0      		ldi r24,lo8(2)
+ 834 03c8 00C0      		rjmp .L28
+ 835               	.L33:
+ 287:fat.c         **** }
+ 836               		.loc 1 287 9 view .LVU136
+ 837 03ca 81E0      		ldi r24,lo8(1)
+ 838 03cc 00C0      		rjmp .L28
+ 839               		.cfi_endproc
+ 840               	.LFE8:
+ 843               	follow_path:
+ 844               	.LVL39:
+ 845               	.LFB7:
+ 219:fat.c         **** 	uint8_t res;
+ 846               		.loc 1 219 1 is_stmt 1 view -0
+ 847               		.cfi_startproc
+ 219:fat.c         **** 	uint8_t res;
+ 848               		.loc 1 219 1 is_stmt 0 view .LVU138
+ 849 03ce AF92      		push r10
+ 850               	.LCFI40:
+ 851               		.cfi_def_cfa_offset 3
+ 852               		.cfi_offset 10, -2
+ 853 03d0 BF92      		push r11
+ 854               	.LCFI41:
+ 855               		.cfi_def_cfa_offset 4
+ 856               		.cfi_offset 11, -3
+ 857 03d2 CF92      		push r12
+ 858               	.LCFI42:
+ 859               		.cfi_def_cfa_offset 5
+ 860               		.cfi_offset 12, -4
+ 861 03d4 DF92      		push r13
+ 862               	.LCFI43:
+ 863               		.cfi_def_cfa_offset 6
+ 864               		.cfi_offset 13, -5
+ 865 03d6 EF92      		push r14
+ 866               	.LCFI44:
+ 867               		.cfi_def_cfa_offset 7
+ 868               		.cfi_offset 14, -6
+ 869 03d8 FF92      		push r15
+ 870               	.LCFI45:
+ 871               		.cfi_def_cfa_offset 8
+ 872               		.cfi_offset 15, -7
+ 873 03da 0F93      		push r16
+ 874               	.LCFI46:
+ 875               		.cfi_def_cfa_offset 9
+ 876               		.cfi_offset 16, -8
+ 877 03dc 1F93      		push r17
+ 878               	.LCFI47:
+ 879               		.cfi_def_cfa_offset 10
+ 880               		.cfi_offset 17, -9
+ 881 03de CF93      		push r28
+ 882               	.LCFI48:
+ 883               		.cfi_def_cfa_offset 11
+ 884               		.cfi_offset 28, -10
+ 885 03e0 DF93      		push r29
+ 886               	.LCFI49:
+ 887               		.cfi_def_cfa_offset 12
+ 888               		.cfi_offset 29, -11
+ 889               	/* prologue: function */
+ 890               	/* frame size = 0 */
+ 891               	/* stack size = 10 */
+ 892               	.L__stack_usage = 10
+ 893 03e2 7C01      		movw r14,r24
+ 894 03e4 6B01      		movw r12,r22
+ 895 03e6 CA01      		movw r24,r20
+ 896               	.LVL40:
+ 220:fat.c         **** 	while(*path == ' ')
+ 897               		.loc 1 220 2 is_stmt 1 view .LVU139
+ 221:fat.c         **** 	{
+ 898               		.loc 1 221 2 view .LVU140
+ 899               	.L35:
+ 221:fat.c         **** 	{
+ 900               		.loc 1 221 2 is_stmt 0 view .LVU141
+ 901 03e8 5C01      		movw r10,r24
+ 902               	.LVL41:
+ 221:fat.c         **** 	{
+ 903               		.loc 1 221 8 view .LVU142
+ 904 03ea DC01      		movw r26,r24
+ 905 03ec 2C91      		ld r18,X
+ 906               	.LVL42:
+ 221:fat.c         **** 	{
+ 907               		.loc 1 221 8 view .LVU143
+ 908 03ee 0196      		adiw r24,1
+ 909               	.LVL43:
+ 221:fat.c         **** 	{
+ 910               		.loc 1 221 7 view .LVU144
+ 911 03f0 2032      		cpi r18,lo8(32)
+ 912 03f2 01F0      		breq .L35
+ 226:fat.c         **** 	{
+ 913               		.loc 1 226 2 is_stmt 1 view .LVU145
+ 226:fat.c         **** 	{
+ 914               		.loc 1 226 4 is_stmt 0 view .LVU146
+ 915 03f4 2F32      		cpi r18,lo8(47)
+ 916 03f6 01F4      		brne .L36
+ 228:fat.c         **** 	}
+ 917               		.loc 1 228 3 is_stmt 1 view .LVU147
+ 228:fat.c         **** 	}
+ 918               		.loc 1 228 7 is_stmt 0 view .LVU148
+ 919 03f8 5C01      		movw r10,r24
+ 920               	.L36:
+ 921               	.LVL44:
+ 231:fat.c         **** 	if((uint8_t)*path < ' ')
+ 922               		.loc 1 231 2 is_stmt 1 view .LVU149
+ 231:fat.c         **** 	if((uint8_t)*path < ' ')
+ 923               		.loc 1 231 13 is_stmt 0 view .LVU150
+ 924 03fa F701      		movw r30,r14
+ 925 03fc 1482      		std Z+4,__zero_reg__
+ 926 03fe 1582      		std Z+5,__zero_reg__
+ 927 0400 1682      		std Z+6,__zero_reg__
+ 928 0402 1782      		std Z+7,__zero_reg__
+ 232:fat.c         **** 	{
+ 929               		.loc 1 232 2 is_stmt 1 view .LVU151
+ 232:fat.c         **** 	{
+ 930               		.loc 1 232 4 is_stmt 0 view .LVU152
+ 931 0404 D501      		movw r26,r10
+ 932 0406 8C91      		ld r24,X
+ 933 0408 8032      		cpi r24,lo8(32)
+ 934 040a 00F0      		brlo .+2
+ 935 040c 00C0      		rjmp .L37
+ 234:fat.c         **** 		dir[0] = 0;
+ 936               		.loc 1 234 3 is_stmt 1 view .LVU153
+ 234:fat.c         **** 		dir[0] = 0;
+ 937               		.loc 1 234 9 is_stmt 0 view .LVU154
+ 938 040e C701      		movw r24,r14
+ 939 0410 0E94 0000 		call dir_rewind
+ 940               	.LVL45:
+ 234:fat.c         **** 		dir[0] = 0;
+ 941               		.loc 1 234 9 view .LVU155
+ 942 0414 C82F      		mov r28,r24
+ 943               	.LVL46:
+ 235:fat.c         **** 	}
+ 944               		.loc 1 235 3 is_stmt 1 view .LVU156
+ 235:fat.c         **** 	}
+ 945               		.loc 1 235 10 is_stmt 0 view .LVU157
+ 946 0416 F601      		movw r30,r12
+ 947 0418 1082      		st Z,__zero_reg__
+ 948               	.LVL47:
+ 949               	.L34:
+ 267:fat.c         **** 
+ 950               		.loc 1 267 1 view .LVU158
+ 951 041a 8C2F      		mov r24,r28
+ 952               	/* epilogue start */
+ 953 041c DF91      		pop r29
+ 954 041e CF91      		pop r28
+ 955 0420 1F91      		pop r17
+ 956 0422 0F91      		pop r16
+ 957 0424 FF90      		pop r15
+ 958 0426 EF90      		pop r14
+ 959               	.LVL48:
+ 267:fat.c         **** 
+ 960               		.loc 1 267 1 view .LVU159
+ 961 0428 DF90      		pop r13
+ 962 042a CF90      		pop r12
+ 963               	.LVL49:
+ 267:fat.c         **** 
+ 964               		.loc 1 267 1 view .LVU160
+ 965 042c BF90      		pop r11
+ 966 042e AF90      		pop r10
+ 967               	.LVL50:
+ 267:fat.c         **** 
+ 968               		.loc 1 267 1 view .LVU161
+ 969 0430 0895      		ret
+ 970               	.LVL51:
+ 971               	.L40:
+ 972               	.LBB14:
+ 973               	.LBB15:
+ 118:fat.c         **** 	sfn[11] = (c <= ' ');
+ 974               		.loc 1 118 2 is_stmt 1 view .LVU162
+ 118:fat.c         **** 	sfn[11] = (c <= ' ');
+ 975               		.loc 1 118 10 is_stmt 0 view .LVU163
+ 976 0432 A30E      		add r10,r19
+ 977 0434 B11C      		adc r11,__zero_reg__
+ 978               	.LVL52:
+ 119:fat.c         **** 	return 0;
+ 979               		.loc 1 119 2 is_stmt 1 view .LVU164
+ 119:fat.c         **** 	return 0;
+ 980               		.loc 1 119 15 is_stmt 0 view .LVU165
+ 981 0436 91E0      		ldi r25,lo8(1)
+ 982               	.LVL53:
+ 119:fat.c         **** 	return 0;
+ 983               		.loc 1 119 15 view .LVU166
+ 984 0438 8132      		cpi r24,lo8(33)
+ 985 043a 00F0      		brlo .L44
+ 119:fat.c         **** 	return 0;
+ 986               		.loc 1 119 15 view .LVU167
+ 987 043c 90E0      		ldi r25,0
+ 988               	.L44:
+ 119:fat.c         **** 	return 0;
+ 989               		.loc 1 119 10 view .LVU168
+ 990 043e 9B87      		std Y+11,r25
+ 120:fat.c         **** }
+ 991               		.loc 1 120 2 is_stmt 1 view .LVU169
+ 992               	.LVL54:
+ 120:fat.c         **** }
+ 993               		.loc 1 120 2 is_stmt 0 view .LVU170
+ 994               	.LBE15:
+ 995               	.LBE14:
+ 246:fat.c         **** 			{
+ 996               		.loc 1 246 4 is_stmt 1 view .LVU171
+ 997               	.LBB17:
+ 998               	.LBI17:
+ 187:fat.c         **** {
+ 999               		.loc 1 187 16 view .LVU172
+ 1000               	.LBB18:
+ 189:fat.c         **** 	if((res = dir_rewind(dj)))
+ 1001               		.loc 1 189 2 view .LVU173
+ 190:fat.c         **** 	{
+ 1002               		.loc 1 190 2 view .LVU174
+ 190:fat.c         **** 	{
+ 1003               		.loc 1 190 12 is_stmt 0 view .LVU175
+ 1004 0440 C701      		movw r24,r14
+ 1005 0442 0E94 0000 		call dir_rewind
+ 1006               	.LVL55:
+ 1007               	.L64:
+ 190:fat.c         **** 	{
+ 1008               		.loc 1 190 12 view .LVU176
+ 1009 0446 C82F      		mov r28,r24
+ 1010               	.LVL56:
+ 190:fat.c         **** 	{
+ 1011               		.loc 1 190 4 view .LVU177
+ 1012 0448 8111      		cpse r24,__zero_reg__
+ 1013 044a 00C0      		rjmp .L34
+ 195:fat.c         **** 	{
+ 1014               		.loc 1 195 2 is_stmt 1 view .LVU178
+ 197:fat.c         **** 		{
+ 1015               		.loc 1 197 3 view .LVU179
+ 197:fat.c         **** 		{
+ 1016               		.loc 1 197 47 is_stmt 0 view .LVU180
+ 1017 044c F701      		movw r30,r14
+ 1018 044e 2081      		ld r18,Z
+ 1019 0450 3181      		ldd r19,Z+1
+ 1020 0452 2F70      		andi r18,15
+ 1021 0454 3327      		clr r19
+ 197:fat.c         **** 		{
+ 1022               		.loc 1 197 13 view .LVU181
+ 1023 0456 85E0      		ldi r24,5
+ 1024               		1:
+ 1025 0458 220F      		lsl r18
+ 1026 045a 331F      		rol r19
+ 1027 045c 8A95      		dec r24
+ 1028 045e 01F4      		brne 1b
+ 1029               	.LVL57:
+ 197:fat.c         **** 		{
+ 1030               		.loc 1 197 13 view .LVU182
+ 1031 0460 4485      		ldd r20,Z+12
+ 1032 0462 5585      		ldd r21,Z+13
+ 1033 0464 6685      		ldd r22,Z+14
+ 1034 0466 7785      		ldd r23,Z+15
+ 1035 0468 00E2      		ldi r16,lo8(32)
+ 1036 046a 10E0      		ldi r17,0
+ 1037 046c C601      		movw r24,r12
+ 1038 046e 0E94 0000 		call sd_read
+ 1039               	.LVL58:
+ 1040 0472 C82F      		mov r28,r24
+ 1041               	.LVL59:
+ 197:fat.c         **** 		{
+ 1042               		.loc 1 197 5 view .LVU183
+ 1043 0474 8111      		cpse r24,__zero_reg__
+ 1044 0476 00C0      		rjmp .L34
+ 202:fat.c         **** 		{
+ 1045               		.loc 1 202 3 is_stmt 1 view .LVU184
+ 202:fat.c         **** 		{
+ 1046               		.loc 1 202 5 is_stmt 0 view .LVU185
+ 1047 0478 D601      		movw r26,r12
+ 1048 047a 8C91      		ld r24,X
+ 1049               	.LVL60:
+ 202:fat.c         **** 		{
+ 1050               		.loc 1 202 5 view .LVU186
+ 1051 047c 8111      		cpse r24,__zero_reg__
+ 1052 047e 00C0      		rjmp .L45
+ 1053               	.LVL61:
+ 1054               	.L50:
+ 204:fat.c         **** 			break;
+ 1055               		.loc 1 204 8 view .LVU187
+ 1056 0480 C1E0      		ldi r28,lo8(1)
+ 1057 0482 00C0      		rjmp .L34
+ 1058               	.LVL62:
+ 1059               	.L45:
+ 208:fat.c         **** 		{
+ 1060               		.loc 1 208 3 is_stmt 1 view .LVU188
+ 1061 0484 F601      		movw r30,r12
+ 1062 0486 8385      		ldd r24,Z+11
+ 208:fat.c         **** 		{
+ 1063               		.loc 1 208 5 is_stmt 0 view .LVU189
+ 1064 0488 C82F      		mov r28,r24
+ 1065               	.LVL63:
+ 208:fat.c         **** 		{
+ 1066               		.loc 1 208 5 view .LVU190
+ 1067 048a C870      		andi r28,lo8(8)
+ 1068 048c 83FF      		sbrs r24,3
+ 1069 048e 00C0      		rjmp .L46
+ 1070               	.L49:
+ 213:fat.c         **** 	} while(!res);
+ 1071               		.loc 1 213 3 is_stmt 1 view .LVU191
+ 213:fat.c         **** 	} while(!res);
+ 1072               		.loc 1 213 9 is_stmt 0 view .LVU192
+ 1073 0490 C701      		movw r24,r14
+ 1074 0492 0E94 0000 		call dir_next
+ 1075               	.LVL64:
+ 1076 0496 00C0      		rjmp .L64
+ 1077               	.L46:
+ 208:fat.c         **** 		{
+ 1078               		.loc 1 208 35 view .LVU193
+ 1079 0498 D701      		movw r26,r14
+ 1080 049a 1296      		adiw r26,2
+ 1081 049c 6D91      		ld r22,X+
+ 1082 049e 7C91      		ld r23,X
+ 1083 04a0 4BE0      		ldi r20,lo8(11)
+ 1084 04a2 50E0      		ldi r21,0
+ 1085 04a4 C601      		movw r24,r12
+ 1086 04a6 0E94 0000 		call mem_cmp
+ 1087               	.LVL65:
+ 208:fat.c         **** 		{
+ 1088               		.loc 1 208 32 view .LVU194
+ 1089 04aa 8823      		tst r24
+ 1090 04ac 01F0      		breq .L49
+ 1091               	.LVL66:
+ 208:fat.c         **** 		{
+ 1092               		.loc 1 208 32 view .LVU195
+ 1093               	.LBE18:
+ 1094               	.LBE17:
+ 251:fat.c         **** 			{
+ 1095               		.loc 1 251 4 is_stmt 1 view .LVU196
+ 251:fat.c         **** 			{
+ 1096               		.loc 1 251 13 is_stmt 0 view .LVU197
+ 1097 04ae D701      		movw r26,r14
+ 1098 04b0 1296      		adiw r26,2
+ 1099 04b2 ED91      		ld r30,X+
+ 1100 04b4 FC91      		ld r31,X
+ 251:fat.c         **** 			{
+ 1101               		.loc 1 251 6 view .LVU198
+ 1102 04b6 8385      		ldd r24,Z+11
+ 1103 04b8 8111      		cpse r24,__zero_reg__
+ 1104 04ba 00C0      		rjmp .L34
+ 256:fat.c         **** 			{
+ 1105               		.loc 1 256 4 is_stmt 1 view .LVU199
+ 256:fat.c         **** 			{
+ 1106               		.loc 1 256 6 is_stmt 0 view .LVU200
+ 1107 04bc F601      		movw r30,r12
+ 1108 04be 8385      		ldd r24,Z+11
+ 1109 04c0 84FF      		sbrs r24,4
+ 1110 04c2 00C0      		rjmp .L50
+ 262:fat.c         **** 		}
+ 1111               		.loc 1 262 4 is_stmt 1 view .LVU201
+ 262:fat.c         **** 		}
+ 1112               		.loc 1 262 17 is_stmt 0 view .LVU202
+ 1113 04c4 C601      		movw r24,r12
+ 1114 04c6 0E94 0000 		call get_cluster
+ 1115               	.LVL67:
+ 1116 04ca D701      		movw r26,r14
+ 1117 04cc 1496      		adiw r26,4
+ 1118 04ce 6D93      		st X+,r22
+ 1119 04d0 7D93      		st X+,r23
+ 1120 04d2 8D93      		st X+,r24
+ 1121 04d4 9C93      		st X,r25
+ 1122 04d6 1797      		sbiw r26,4+3
+ 1123               	.LVL68:
+ 1124               	.L37:
+ 239:fat.c         **** 		{
+ 1125               		.loc 1 239 3 is_stmt 1 view .LVU203
+ 241:fat.c         **** 			{
+ 1126               		.loc 1 241 4 view .LVU204
+ 241:fat.c         **** 			{
+ 1127               		.loc 1 241 14 is_stmt 0 view .LVU205
+ 1128 04d8 D701      		movw r26,r14
+ 1129 04da 1296      		adiw r26,2
+ 1130 04dc CD91      		ld r28,X+
+ 1131 04de DC91      		ld r29,X
+ 1132               	.LVL69:
+ 1133               	.LBB19:
+ 1134               	.LBI14:
+  79:fat.c         **** {
+ 1135               		.loc 1 79 16 is_stmt 1 view .LVU206
+ 1136               	.LBB16:
+  81:fat.c         **** 	const char *p;
+ 1137               		.loc 1 81 2 view .LVU207
+  82:fat.c         **** 	sfn = dj->fn;
+ 1138               		.loc 1 82 2 view .LVU208
+  83:fat.c         **** 	mem_set(sfn, ' ', 11);
+ 1139               		.loc 1 83 2 view .LVU209
+  84:fat.c         **** 	si = 0;
+ 1140               		.loc 1 84 2 view .LVU210
+ 1141 04e0 4BE0      		ldi r20,lo8(11)
+ 1142 04e2 50E0      		ldi r21,0
+ 1143 04e4 60E2      		ldi r22,lo8(32)
+ 1144 04e6 CE01      		movw r24,r28
+ 1145 04e8 0E94 0000 		call mem_set
+ 1146               	.LVL70:
+  85:fat.c         **** 	i = 0;
+ 1147               		.loc 1 85 2 view .LVU211
+  86:fat.c         **** 	ni = 8;
+ 1148               		.loc 1 86 2 view .LVU212
+  87:fat.c         **** 	p = *path;
+ 1149               		.loc 1 87 2 view .LVU213
+  88:fat.c         **** 	for(;;)
+ 1150               		.loc 1 88 2 view .LVU214
+  86:fat.c         **** 	ni = 8;
+ 1151               		.loc 1 86 4 is_stmt 0 view .LVU215
+ 1152 04ec 20E0      		ldi r18,0
+  85:fat.c         **** 	i = 0;
+ 1153               		.loc 1 85 5 view .LVU216
+ 1154 04ee E0E0      		ldi r30,0
+  87:fat.c         **** 	p = *path;
+ 1155               		.loc 1 87 5 view .LVU217
+ 1156 04f0 98E0      		ldi r25,lo8(8)
+ 1157               	.LVL71:
+ 1158               	.L39:
+  89:fat.c         **** 	{
+ 1159               		.loc 1 89 2 is_stmt 1 view .LVU218
+  91:fat.c         **** 		if(c <= ' ' || c == '/')
+ 1160               		.loc 1 91 3 view .LVU219
+  91:fat.c         **** 		if(c <= ' ' || c == '/')
+ 1161               		.loc 1 91 11 is_stmt 0 view .LVU220
+ 1162 04f2 31E0      		ldi r19,lo8(1)
+ 1163 04f4 3E0F      		add r19,r30
+ 1164               	.LVL72:
+  91:fat.c         **** 		if(c <= ' ' || c == '/')
+ 1165               		.loc 1 91 5 view .LVU221
+ 1166 04f6 EA0D      		add r30,r10
+ 1167 04f8 FB2D      		mov r31,r11
+ 1168 04fa F11D      		adc r31,__zero_reg__
+ 1169 04fc 8081      		ld r24,Z
+ 1170               	.LVL73:
+  92:fat.c         **** 		{
+ 1171               		.loc 1 92 3 is_stmt 1 view .LVU222
+  92:fat.c         **** 		{
+ 1172               		.loc 1 92 5 is_stmt 0 view .LVU223
+ 1173 04fe 8132      		cpi r24,lo8(33)
+ 1174 0500 00F4      		brsh .+2
+ 1175 0502 00C0      		rjmp .L40
+  92:fat.c         **** 		{
+ 1176               		.loc 1 92 15 view .LVU224
+ 1177 0504 8F32      		cpi r24,lo8(47)
+ 1178 0506 01F4      		brne .+2
+ 1179 0508 00C0      		rjmp .L40
+  97:fat.c         **** 		{
+ 1180               		.loc 1 97 3 is_stmt 1 view .LVU225
+  97:fat.c         **** 		{
+ 1181               		.loc 1 97 6 is_stmt 0 view .LVU226
+ 1182 050a 8E32      		cpi r24,lo8(46)
+ 1183 050c 01F0      		breq .L41
+  97:fat.c         **** 		{
+ 1184               		.loc 1 97 16 view .LVU227
+ 1185 050e 2917      		cp r18,r25
+ 1186 0510 00F0      		brlo .+2
+ 1187 0512 00C0      		rjmp .L40
+ 110:fat.c         **** 		{
+ 1188               		.loc 1 110 3 is_stmt 1 view .LVU228
+ 110:fat.c         **** 		{
+ 1189               		.loc 1 110 15 is_stmt 0 view .LVU229
+ 1190 0514 4FE9      		ldi r20,lo8(-97)
+ 1191 0516 480F      		add r20,r24
+ 110:fat.c         **** 		{
+ 1192               		.loc 1 110 5 view .LVU230
+ 1193 0518 4A31      		cpi r20,lo8(26)
+ 1194 051a 00F4      		brsh .L42
+ 112:fat.c         **** 		}
+ 1195               		.loc 1 112 4 is_stmt 1 view .LVU231
+ 112:fat.c         **** 		}
+ 1196               		.loc 1 112 6 is_stmt 0 view .LVU232
+ 1197 051c 8052      		subi r24,lo8(-(-32))
+ 1198               	.LVL74:
+ 1199               	.L42:
+ 115:fat.c         **** 	}
+ 1200               		.loc 1 115 3 is_stmt 1 view .LVU233
+ 115:fat.c         **** 	}
+ 1201               		.loc 1 115 12 is_stmt 0 view .LVU234
+ 1202 051e FE01      		movw r30,r28
+ 1203 0520 E20F      		add r30,r18
+ 1204 0522 F11D      		adc r31,__zero_reg__
+ 1205 0524 8083      		st Z,r24
+ 1206 0526 892F      		mov r24,r25
+ 1207               	.LVL75:
+ 115:fat.c         **** 	}
+ 1208               		.loc 1 115 8 view .LVU235
+ 1209 0528 91E0      		ldi r25,lo8(1)
+ 1210               	.LVL76:
+ 115:fat.c         **** 	}
+ 1211               		.loc 1 115 8 view .LVU236
+ 1212 052a 920F      		add r25,r18
+ 1213               	.LVL77:
+ 1214               	.L43:
+ 105:fat.c         **** 			continue;
+ 1215               		.loc 1 105 7 view .LVU237
+ 1216 052c 292F      		mov r18,r25
+  91:fat.c         **** 		if(c <= ' ' || c == '/')
+ 1217               		.loc 1 91 11 view .LVU238
+ 1218 052e E32F      		mov r30,r19
+ 1219 0530 982F      		mov r25,r24
+ 1220 0532 00C0      		rjmp .L39
+ 1221               	.LVL78:
+ 1222               	.L41:
+  99:fat.c         **** 			{
+ 1223               		.loc 1 99 4 is_stmt 1 view .LVU239
+  99:fat.c         **** 			{
+ 1224               		.loc 1 99 6 is_stmt 0 view .LVU240
+ 1225 0534 9830      		cpi r25,lo8(8)
+ 1226 0536 01F0      		breq .+2
+ 1227 0538 00C0      		rjmp .L40
+ 105:fat.c         **** 			continue;
+ 1228               		.loc 1 105 7 view .LVU241
+ 1229 053a 8BE0      		ldi r24,lo8(11)
+ 1230               	.LVL79:
+ 105:fat.c         **** 			continue;
+ 1231               		.loc 1 105 7 view .LVU242
+ 1232 053c 00C0      		rjmp .L43
+ 1233               	.LBE16:
+ 1234               	.LBE19:
+ 1235               		.cfi_endproc
+ 1236               	.LFE7:
+ 1238               	.global	fat_mount
+ 1240               	fat_mount:
+ 1241               	.LFB9:
+ 289:fat.c         **** 
+ 290:fat.c         **** uint8_t fat_mount(void)
+ 291:fat.c         **** {
+ 1242               		.loc 1 291 1 is_stmt 1 view -0
+ 1243               		.cfi_startproc
+ 1244 053e CF92      		push r12
+ 1245               	.LCFI50:
+ 1246               		.cfi_def_cfa_offset 3
+ 1247               		.cfi_offset 12, -2
+ 1248 0540 DF92      		push r13
+ 1249               	.LCFI51:
+ 1250               		.cfi_def_cfa_offset 4
+ 1251               		.cfi_offset 13, -3
+ 1252 0542 EF92      		push r14
+ 1253               	.LCFI52:
+ 1254               		.cfi_def_cfa_offset 5
+ 1255               		.cfi_offset 14, -4
+ 1256 0544 FF92      		push r15
+ 1257               	.LCFI53:
+ 1258               		.cfi_def_cfa_offset 6
+ 1259               		.cfi_offset 15, -5
+ 1260 0546 0F93      		push r16
+ 1261               	.LCFI54:
+ 1262               		.cfi_def_cfa_offset 7
+ 1263               		.cfi_offset 16, -6
+ 1264 0548 1F93      		push r17
+ 1265               	.LCFI55:
+ 1266               		.cfi_def_cfa_offset 8
+ 1267               		.cfi_offset 17, -7
+ 1268 054a CF93      		push r28
+ 1269               	.LCFI56:
+ 1270               		.cfi_def_cfa_offset 9
+ 1271               		.cfi_offset 28, -8
+ 1272 054c DF93      		push r29
+ 1273               	.LCFI57:
+ 1274               		.cfi_def_cfa_offset 10
+ 1275               		.cfi_offset 29, -9
+ 1276 054e CDB7      		in r28,__SP_L__
+ 1277 0550 DEB7      		in r29,__SP_H__
+ 1278               	.LCFI58:
+ 1279               		.cfi_def_cfa_register 28
+ 1280 0552 AC97      		sbiw r28,44
+ 1281               	.LCFI59:
+ 1282               		.cfi_def_cfa_offset 54
+ 1283 0554 0FB6      		in __tmp_reg__,__SREG__
+ 1284 0556 F894      		cli
+ 1285 0558 DEBF      		out __SP_H__,r29
+ 1286 055a 0FBE      		out __SREG__,__tmp_reg__
+ 1287 055c CDBF      		out __SP_L__,r28
+ 1288               	/* prologue: function */
+ 1289               	/* frame size = 44 */
+ 1290               	/* stack size = 52 */
+ 1291               	.L__stack_usage = 52
+ 292:fat.c         **** 	uint8_t fmt, buf[36];
+ 1292               		.loc 1 292 2 view .LVU244
+ 293:fat.c         **** 	uint32_t bsect, fsize, tsect, mclst;
+ 1293               		.loc 1 293 2 view .LVU245
+ 294:fat.c         **** 	bsect = 0;
+ 1294               		.loc 1 294 2 view .LVU246
+ 1295               	.LVL80:
+ 295:fat.c         **** 	if((fmt = check_fs(buf, bsect)))
+ 1296               		.loc 1 295 2 view .LVU247
+ 1297               		.loc 1 295 12 is_stmt 0 view .LVU248
+ 1298 055e 40E0      		ldi r20,0
+ 1299 0560 50E0      		ldi r21,0
+ 1300 0562 BA01      		movw r22,r20
+ 1301 0564 CE01      		movw r24,r28
+ 1302 0566 0196      		adiw r24,1
+ 1303 0568 0E94 0000 		call check_fs
+ 1304               	.LVL81:
+ 294:fat.c         **** 	bsect = 0;
+ 1305               		.loc 1 294 8 view .LVU249
+ 1306 056c C12C      		mov r12,__zero_reg__
+ 1307 056e D12C      		mov r13,__zero_reg__
+ 1308 0570 7601      		movw r14,r12
+ 1309               		.loc 1 295 4 view .LVU250
+ 1310 0572 8823      		tst r24
+ 1311 0574 01F0      		breq .L66
+ 296:fat.c         **** 	{
+ 297:fat.c         **** 		if(!sd_read(buf, bsect, MBR_TABLE, 16))
+ 1312               		.loc 1 297 3 is_stmt 1 view .LVU251
+ 1313               		.loc 1 297 7 is_stmt 0 view .LVU252
+ 1314 0576 00E1      		ldi r16,lo8(16)
+ 1315 0578 10E0      		ldi r17,0
+ 1316 057a 2EEB      		ldi r18,lo8(-66)
+ 1317 057c 31E0      		ldi r19,lo8(1)
+ 1318 057e 40E0      		ldi r20,0
+ 1319 0580 50E0      		ldi r21,0
+ 1320 0582 BA01      		movw r22,r20
+ 1321 0584 CE01      		movw r24,r28
+ 1322               	.LVL82:
+ 1323               		.loc 1 297 7 view .LVU253
+ 1324 0586 0196      		adiw r24,1
+ 1325 0588 0E94 0000 		call sd_read
+ 1326               	.LVL83:
+ 1327               		.loc 1 297 5 view .LVU254
+ 1328 058c 8823      		tst r24
+ 1329 058e 01F0      		breq .L67
+ 1330               	.LVL84:
+ 1331               	.L69:
+ 298:fat.c         **** 		{
+ 299:fat.c         **** 			if(buf[4])
+ 300:fat.c         **** 			{
+ 301:fat.c         **** 				bsect = ld_u32(&buf[8]);
+ 302:fat.c         **** 				fmt = check_fs(buf, bsect);
+ 303:fat.c         **** 			}
+ 304:fat.c         **** 		}
+ 305:fat.c         **** 	}
+ 306:fat.c         **** 
+ 307:fat.c         **** 	if(fmt)
+ 308:fat.c         **** 	{
+ 309:fat.c         **** 		return 1;
+ 1332               		.loc 1 309 10 view .LVU255
+ 1333 0590 11E0      		ldi r17,lo8(1)
+ 1334               	.L65:
+ 310:fat.c         **** 	}
+ 311:fat.c         **** 
+ 312:fat.c         **** 	if(sd_read(buf, bsect, 13, sizeof(buf)))
+ 313:fat.c         **** 	{
+ 314:fat.c         **** 		return 1;
+ 315:fat.c         **** 	}
+ 316:fat.c         **** 
+ 317:fat.c         **** 	if(!(fsize = ld_u16(buf + BPB_FAT_SIZE_16 - 13)))
+ 318:fat.c         **** 	{
+ 319:fat.c         **** 		fsize = ld_u32(buf + BPB_FAT_SIZE_32 - 13);
+ 320:fat.c         **** 	}
+ 321:fat.c         **** 
+ 322:fat.c         **** 	fsize *= buf[PBP_NUM_FATS - 13];
+ 323:fat.c         **** 	_fs.fatbase = bsect + ld_u16(buf + BPB_RESERVED_SECTOR_COUNT - 13);
+ 324:fat.c         **** 	_fs.csize = buf[BPB_SECTORS_PER_CLUSTER - 13];
+ 325:fat.c         **** 	_fs.n_rootdir = ld_u16(buf + PBP_ROOT_ENTRY_COUNT - 13);
+ 326:fat.c         **** 	if(!(tsect = ld_u16(buf + BPB_TOTAL_SECTORS_16 - 13)))
+ 327:fat.c         **** 	{
+ 328:fat.c         **** 		tsect = ld_u32(buf + BPB_TOTAL_SECTORS_32 - 13);
+ 329:fat.c         **** 	}
+ 330:fat.c         **** 
+ 331:fat.c         **** 	mclst = (tsect - ld_u16(buf + BPB_RESERVED_SECTOR_COUNT - 13) -
+ 332:fat.c         **** 		fsize - _fs.n_rootdir / 16) / _fs.csize + 2;
+ 333:fat.c         **** 
+ 334:fat.c         **** 	_fs.n_fatent = (uint32_t)mclst;
+ 335:fat.c         **** 	if(!(mclst >= 0xFFF7))
+ 336:fat.c         **** 	{
+ 337:fat.c         **** 		return 1;
+ 338:fat.c         **** 	}
+ 339:fat.c         **** 
+ 340:fat.c         **** 	_fs.dirbase = ld_u32(buf + (BPB_ROOT_CLUSTER - 13));
+ 341:fat.c         **** 	_fs.database = _fs.fatbase + fsize + _fs.n_rootdir / 16;
+ 342:fat.c         **** 	return 0;
+ 343:fat.c         **** }
+ 1335               		.loc 1 343 1 view .LVU256
+ 1336 0592 812F      		mov r24,r17
+ 1337               	/* epilogue start */
+ 1338 0594 AC96      		adiw r28,44
+ 1339 0596 0FB6      		in __tmp_reg__,__SREG__
+ 1340 0598 F894      		cli
+ 1341 059a DEBF      		out __SP_H__,r29
+ 1342 059c 0FBE      		out __SREG__,__tmp_reg__
+ 1343 059e CDBF      		out __SP_L__,r28
+ 1344 05a0 DF91      		pop r29
+ 1345 05a2 CF91      		pop r28
+ 1346 05a4 1F91      		pop r17
+ 1347 05a6 0F91      		pop r16
+ 1348 05a8 FF90      		pop r15
+ 1349 05aa EF90      		pop r14
+ 1350 05ac DF90      		pop r13
+ 1351 05ae CF90      		pop r12
+ 1352 05b0 0895      		ret
+ 1353               	.LVL85:
+ 1354               	.L67:
+ 299:fat.c         **** 			{
+ 1355               		.loc 1 299 4 is_stmt 1 view .LVU257
+ 299:fat.c         **** 			{
+ 1356               		.loc 1 299 6 is_stmt 0 view .LVU258
+ 1357 05b2 8D81      		ldd r24,Y+5
+ 1358 05b4 8823      		tst r24
+ 1359 05b6 01F0      		breq .L69
+ 301:fat.c         **** 				fmt = check_fs(buf, bsect);
+ 1360               		.loc 1 301 5 is_stmt 1 view .LVU259
+ 301:fat.c         **** 				fmt = check_fs(buf, bsect);
+ 1361               		.loc 1 301 13 is_stmt 0 view .LVU260
+ 1362 05b8 CE01      		movw r24,r28
+ 1363 05ba 0996      		adiw r24,9
+ 1364 05bc 0E94 0000 		call ld_u32
+ 1365               	.LVL86:
+ 1366 05c0 6B01      		movw r12,r22
+ 1367 05c2 7C01      		movw r14,r24
+ 1368               	.LVL87:
+ 302:fat.c         **** 			}
+ 1369               		.loc 1 302 5 is_stmt 1 view .LVU261
+ 302:fat.c         **** 			}
+ 1370               		.loc 1 302 11 is_stmt 0 view .LVU262
+ 1371 05c4 BC01      		movw r22,r24
+ 1372 05c6 A601      		movw r20,r12
+ 1373 05c8 CE01      		movw r24,r28
+ 1374 05ca 0196      		adiw r24,1
+ 1375 05cc 0E94 0000 		call check_fs
+ 1376               	.LVL88:
+ 307:fat.c         **** 	{
+ 1377               		.loc 1 307 2 is_stmt 1 view .LVU263
+ 307:fat.c         **** 	{
+ 1378               		.loc 1 307 4 is_stmt 0 view .LVU264
+ 1379 05d0 8111      		cpse r24,__zero_reg__
+ 1380 05d2 00C0      		rjmp .L69
+ 1381               	.LVL89:
+ 1382               	.L66:
+ 312:fat.c         **** 	{
+ 1383               		.loc 1 312 2 is_stmt 1 view .LVU265
+ 312:fat.c         **** 	{
+ 1384               		.loc 1 312 5 is_stmt 0 view .LVU266
+ 1385 05d4 04E2      		ldi r16,lo8(36)
+ 1386 05d6 10E0      		ldi r17,0
+ 1387 05d8 2DE0      		ldi r18,lo8(13)
+ 1388 05da 30E0      		ldi r19,0
+ 1389 05dc B701      		movw r22,r14
+ 1390 05de A601      		movw r20,r12
+ 1391 05e0 CE01      		movw r24,r28
+ 1392 05e2 0196      		adiw r24,1
+ 1393 05e4 0E94 0000 		call sd_read
+ 1394               	.LVL90:
+ 1395 05e8 182F      		mov r17,r24
+ 312:fat.c         **** 	{
+ 1396               		.loc 1 312 4 view .LVU267
+ 1397 05ea 8111      		cpse r24,__zero_reg__
+ 1398 05ec 00C0      		rjmp .L69
+ 317:fat.c         **** 	{
+ 1399               		.loc 1 317 2 is_stmt 1 view .LVU268
+ 317:fat.c         **** 	{
+ 1400               		.loc 1 317 15 is_stmt 0 view .LVU269
+ 1401 05ee CE01      		movw r24,r28
+ 1402 05f0 0A96      		adiw r24,10
+ 1403 05f2 0E94 0000 		call ld_u16
+ 1404               	.LVL91:
+ 317:fat.c         **** 	{
+ 1405               		.loc 1 317 13 view .LVU270
+ 1406 05f6 9C01      		movw r18,r24
+ 1407 05f8 50E0      		ldi r21,0
+ 1408 05fa 40E0      		ldi r20,0
+ 1409               	.LVL92:
+ 317:fat.c         **** 	{
+ 1410               		.loc 1 317 4 view .LVU271
+ 1411 05fc 892B      		or r24,r25
+ 1412 05fe 01F4      		brne .L70
+ 319:fat.c         **** 	}
+ 1413               		.loc 1 319 3 is_stmt 1 view .LVU272
+ 319:fat.c         **** 	}
+ 1414               		.loc 1 319 11 is_stmt 0 view .LVU273
+ 1415 0600 CE01      		movw r24,r28
+ 1416 0602 4896      		adiw r24,24
+ 1417 0604 0E94 0000 		call ld_u32
+ 1418               	.LVL93:
+ 319:fat.c         **** 	}
+ 1419               		.loc 1 319 11 view .LVU274
+ 1420 0608 9B01      		movw r18,r22
+ 1421 060a AC01      		movw r20,r24
+ 1422               	.LVL94:
+ 1423               	.L70:
+ 322:fat.c         **** 	_fs.fatbase = bsect + ld_u16(buf + BPB_RESERVED_SECTOR_COUNT - 13);
+ 1424               		.loc 1 322 2 is_stmt 1 view .LVU275
+ 322:fat.c         **** 	_fs.fatbase = bsect + ld_u16(buf + BPB_RESERVED_SECTOR_COUNT - 13);
+ 1425               		.loc 1 322 14 is_stmt 0 view .LVU276
+ 1426 060c AC81      		ldd r26,Y+4
+ 322:fat.c         **** 	_fs.fatbase = bsect + ld_u16(buf + BPB_RESERVED_SECTOR_COUNT - 13);
+ 1427               		.loc 1 322 8 view .LVU277
+ 1428 060e B0E0      		ldi r27,0
+ 1429 0610 0E94 0000 		call __muluhisi3
+ 1430 0614 69A7      		std Y+41,r22
+ 1431 0616 7AA7      		std Y+42,r23
+ 1432 0618 8BA7      		std Y+43,r24
+ 1433 061a 9CA7      		std Y+44,r25
+ 1434               	.LVL95:
+ 323:fat.c         **** 	_fs.csize = buf[BPB_SECTORS_PER_CLUSTER - 13];
+ 1435               		.loc 1 323 2 is_stmt 1 view .LVU278
+ 323:fat.c         **** 	_fs.csize = buf[BPB_SECTORS_PER_CLUSTER - 13];
+ 1436               		.loc 1 323 24 is_stmt 0 view .LVU279
+ 1437 061c CE01      		movw r24,r28
+ 1438 061e 0296      		adiw r24,2
+ 1439 0620 0E94 0000 		call ld_u16
+ 1440               	.LVL96:
+ 323:fat.c         **** 	_fs.csize = buf[BPB_SECTORS_PER_CLUSTER - 13];
+ 1441               		.loc 1 323 22 view .LVU280
+ 1442 0624 C80E      		add r12,r24
+ 1443 0626 D91E      		adc r13,r25
+ 1444 0628 E11C      		adc r14,__zero_reg__
+ 1445 062a F11C      		adc r15,__zero_reg__
+ 1446               	.LVL97:
+ 323:fat.c         **** 	_fs.csize = buf[BPB_SECTORS_PER_CLUSTER - 13];
+ 1447               		.loc 1 323 14 view .LVU281
+ 1448 062c C092 0000 		sts _fs+7,r12
+ 1449 0630 D092 0000 		sts _fs+7+1,r13
+ 1450 0634 E092 0000 		sts _fs+7+2,r14
+ 1451 0638 F092 0000 		sts _fs+7+3,r15
+ 324:fat.c         **** 	_fs.n_rootdir = ld_u16(buf + PBP_ROOT_ENTRY_COUNT - 13);
+ 1452               		.loc 1 324 2 is_stmt 1 view .LVU282
+ 324:fat.c         **** 	_fs.n_rootdir = ld_u16(buf + PBP_ROOT_ENTRY_COUNT - 13);
+ 1453               		.loc 1 324 12 is_stmt 0 view .LVU283
+ 1454 063c 8981      		ldd r24,Y+1
+ 1455 063e 8093 0000 		sts _fs,r24
+ 325:fat.c         **** 	if(!(tsect = ld_u16(buf + BPB_TOTAL_SECTORS_16 - 13)))
+ 1456               		.loc 1 325 2 is_stmt 1 view .LVU284
+ 325:fat.c         **** 	if(!(tsect = ld_u16(buf + BPB_TOTAL_SECTORS_16 - 13)))
+ 1457               		.loc 1 325 18 is_stmt 0 view .LVU285
+ 1458 0642 CE01      		movw r24,r28
+ 1459 0644 0596      		adiw r24,5
+ 1460 0646 0E94 0000 		call ld_u16
+ 1461               	.LVL98:
+ 325:fat.c         **** 	if(!(tsect = ld_u16(buf + BPB_TOTAL_SECTORS_16 - 13)))
+ 1462               		.loc 1 325 16 view .LVU286
+ 1463 064a 9093 0000 		sts _fs+1+1,r25
+ 1464 064e 8093 0000 		sts _fs+1,r24
+ 326:fat.c         **** 	{
+ 1465               		.loc 1 326 2 is_stmt 1 view .LVU287
+ 326:fat.c         **** 	{
+ 1466               		.loc 1 326 15 is_stmt 0 view .LVU288
+ 1467 0652 CE01      		movw r24,r28
+ 1468 0654 0796      		adiw r24,7
+ 1469 0656 0E94 0000 		call ld_u16
+ 1470               	.LVL99:
+ 326:fat.c         **** 	{
+ 1471               		.loc 1 326 13 view .LVU289
+ 1472 065a 6C01      		movw r12,r24
+ 1473 065c F12C      		mov r15,__zero_reg__
+ 1474 065e E12C      		mov r14,__zero_reg__
+ 1475               	.LVL100:
+ 326:fat.c         **** 	{
+ 1476               		.loc 1 326 4 view .LVU290
+ 1477 0660 892B      		or r24,r25
+ 1478 0662 01F4      		brne .L71
+ 328:fat.c         **** 	}
+ 1479               		.loc 1 328 3 is_stmt 1 view .LVU291
+ 328:fat.c         **** 	}
+ 1480               		.loc 1 328 11 is_stmt 0 view .LVU292
+ 1481 0664 CE01      		movw r24,r28
+ 1482 0666 4496      		adiw r24,20
+ 1483 0668 0E94 0000 		call ld_u32
+ 1484               	.LVL101:
+ 1485 066c 6B01      		movw r12,r22
+ 1486               	.LVL102:
+ 328:fat.c         **** 	}
+ 1487               		.loc 1 328 11 view .LVU293
+ 1488 066e 7C01      		movw r14,r24
+ 1489               	.LVL103:
+ 1490               	.L71:
+ 331:fat.c         **** 		fsize - _fs.n_rootdir / 16) / _fs.csize + 2;
+ 1491               		.loc 1 331 2 is_stmt 1 view .LVU294
+ 331:fat.c         **** 		fsize - _fs.n_rootdir / 16) / _fs.csize + 2;
+ 1492               		.loc 1 331 19 is_stmt 0 view .LVU295
+ 1493 0670 CE01      		movw r24,r28
+ 1494 0672 0296      		adiw r24,2
+ 1495 0674 0E94 0000 		call ld_u16
+ 1496               	.LVL104:
+ 332:fat.c         **** 
+ 1497               		.loc 1 332 25 view .LVU296
+ 1498 0678 2091 0000 		lds r18,_fs+1
+ 1499 067c 3091 0000 		lds r19,_fs+1+1
+ 1500 0680 44E0      		ldi r20,4
+ 1501               		1:
+ 1502 0682 3695      		lsr r19
+ 1503 0684 2795      		ror r18
+ 1504 0686 4A95      		dec r20
+ 1505 0688 01F4      		brne 1b
+ 332:fat.c         **** 
+ 1506               		.loc 1 332 9 view .LVU297
+ 1507 068a 49A5      		ldd r20,Y+41
+ 1508 068c 5AA5      		ldd r21,Y+42
+ 1509 068e 6BA5      		ldd r22,Y+43
+ 1510 0690 7CA5      		ldd r23,Y+44
+ 1511 0692 420F      		add r20,r18
+ 1512 0694 531F      		adc r21,r19
+ 1513 0696 611D      		adc r22,__zero_reg__
+ 1514 0698 711D      		adc r23,__zero_reg__
+ 1515 069a C41A      		sub r12,r20
+ 1516 069c D50A      		sbc r13,r21
+ 1517 069e E60A      		sbc r14,r22
+ 1518 06a0 F70A      		sbc r15,r23
+ 1519               	.LVL105:
+ 332:fat.c         **** 
+ 1520               		.loc 1 332 9 view .LVU298
+ 1521 06a2 A701      		movw r20,r14
+ 1522 06a4 9601      		movw r18,r12
+ 1523 06a6 281B      		sub r18,r24
+ 1524 06a8 390B      		sbc r19,r25
+ 1525 06aa 4109      		sbc r20,__zero_reg__
+ 1526 06ac 5109      		sbc r21,__zero_reg__
+ 1527 06ae 2DA3      		std Y+37,r18
+ 1528 06b0 3EA3      		std Y+38,r19
+ 1529 06b2 4FA3      		std Y+39,r20
+ 1530 06b4 58A7      		std Y+40,r21
+ 332:fat.c         **** 
+ 1531               		.loc 1 332 36 view .LVU299
+ 1532 06b6 2091 0000 		lds r18,_fs
+ 1533 06ba 30E0      		ldi r19,0
+ 1534 06bc 50E0      		ldi r21,0
+ 1535 06be 40E0      		ldi r20,0
+ 332:fat.c         **** 
+ 1536               		.loc 1 332 31 view .LVU300
+ 1537 06c0 6DA1      		ldd r22,Y+37
+ 1538 06c2 7EA1      		ldd r23,Y+38
+ 1539 06c4 8FA1      		ldd r24,Y+39
+ 1540 06c6 98A5      		ldd r25,Y+40
+ 1541 06c8 0E94 0000 		call __udivmodsi4
+ 331:fat.c         **** 		fsize - _fs.n_rootdir / 16) / _fs.csize + 2;
+ 1542               		.loc 1 331 8 view .LVU301
+ 1543 06cc DA01      		movw r26,r20
+ 1544 06ce C901      		movw r24,r18
+ 1545 06d0 0296      		adiw r24,2
+ 1546 06d2 A11D      		adc r26,__zero_reg__
+ 1547 06d4 B11D      		adc r27,__zero_reg__
+ 1548               	.LVL106:
+ 334:fat.c         **** 	if(!(mclst >= 0xFFF7))
+ 1549               		.loc 1 334 2 is_stmt 1 view .LVU302
+ 334:fat.c         **** 	if(!(mclst >= 0xFFF7))
+ 1550               		.loc 1 334 15 is_stmt 0 view .LVU303
+ 1551 06d6 8093 0000 		sts _fs+3,r24
+ 1552 06da 9093 0000 		sts _fs+3+1,r25
+ 1553 06de A093 0000 		sts _fs+3+2,r26
+ 1554 06e2 B093 0000 		sts _fs+3+3,r27
+ 335:fat.c         **** 	{
+ 1555               		.loc 1 335 2 is_stmt 1 view .LVU304
+ 335:fat.c         **** 	{
+ 1556               		.loc 1 335 4 is_stmt 0 view .LVU305
+ 1557 06e6 873F      		cpi r24,-9
+ 1558 06e8 9F4F      		sbci r25,-1
+ 1559 06ea A105      		cpc r26,__zero_reg__
+ 1560 06ec B105      		cpc r27,__zero_reg__
+ 1561 06ee 00F4      		brsh .+2
+ 1562 06f0 00C0      		rjmp .L69
+ 340:fat.c         **** 	_fs.database = _fs.fatbase + fsize + _fs.n_rootdir / 16;
+ 1563               		.loc 1 340 2 is_stmt 1 view .LVU306
+ 340:fat.c         **** 	_fs.database = _fs.fatbase + fsize + _fs.n_rootdir / 16;
+ 1564               		.loc 1 340 16 is_stmt 0 view .LVU307
+ 1565 06f2 CE01      		movw r24,r28
+ 1566               	.LVL107:
+ 340:fat.c         **** 	_fs.database = _fs.fatbase + fsize + _fs.n_rootdir / 16;
+ 1567               		.loc 1 340 16 view .LVU308
+ 1568 06f4 8096      		adiw r24,32
+ 1569 06f6 0E94 0000 		call ld_u32
+ 1570               	.LVL108:
+ 340:fat.c         **** 	_fs.database = _fs.fatbase + fsize + _fs.n_rootdir / 16;
+ 1571               		.loc 1 340 16 view .LVU309
+ 1572 06fa 6093 0000 		sts _fs+11,r22
+ 1573 06fe 7093 0000 		sts _fs+11+1,r23
+ 1574 0702 8093 0000 		sts _fs+11+2,r24
+ 1575 0706 9093 0000 		sts _fs+11+3,r25
+ 341:fat.c         **** 	return 0;
+ 1576               		.loc 1 341 2 is_stmt 1 view .LVU310
+ 341:fat.c         **** 	return 0;
+ 1577               		.loc 1 341 53 is_stmt 0 view .LVU311
+ 1578 070a 2091 0000 		lds r18,_fs+1
+ 1579 070e 3091 0000 		lds r19,_fs+1+1
+ 1580 0712 84E0      		ldi r24,4
+ 1581               		1:
+ 1582 0714 3695      		lsr r19
+ 1583 0716 2795      		ror r18
+ 1584 0718 8A95      		dec r24
+ 1585 071a 01F4      		brne 1b
+ 341:fat.c         **** 	return 0;
+ 1586               		.loc 1 341 37 view .LVU312
+ 1587 071c 8091 0000 		lds r24,_fs+7
+ 1588 0720 9091 0000 		lds r25,_fs+7+1
+ 1589 0724 A091 0000 		lds r26,_fs+7+2
+ 1590 0728 B091 0000 		lds r27,_fs+7+3
+ 1591 072c 820F      		add r24,r18
+ 1592 072e 931F      		adc r25,r19
+ 1593 0730 A11D      		adc r26,__zero_reg__
+ 1594 0732 B11D      		adc r27,__zero_reg__
+ 1595 0734 29A5      		ldd r18,Y+41
+ 1596 0736 3AA5      		ldd r19,Y+42
+ 1597 0738 4BA5      		ldd r20,Y+43
+ 1598 073a 5CA5      		ldd r21,Y+44
+ 1599 073c 820F      		add r24,r18
+ 1600 073e 931F      		adc r25,r19
+ 1601 0740 A41F      		adc r26,r20
+ 1602 0742 B51F      		adc r27,r21
+ 341:fat.c         **** 	return 0;
+ 1603               		.loc 1 341 15 view .LVU313
+ 1604 0744 8093 0000 		sts _fs+15,r24
+ 1605 0748 9093 0000 		sts _fs+15+1,r25
+ 1606 074c A093 0000 		sts _fs+15+2,r26
+ 1607 0750 B093 0000 		sts _fs+15+3,r27
+ 342:fat.c         **** }
+ 1608               		.loc 1 342 2 is_stmt 1 view .LVU314
+ 342:fat.c         **** }
+ 1609               		.loc 1 342 9 is_stmt 0 view .LVU315
+ 1610 0754 00C0      		rjmp .L65
+ 1611               		.cfi_endproc
+ 1612               	.LFE9:
+ 1614               	.global	fat_fopen
+ 1616               	fat_fopen:
+ 1617               	.LVL109:
+ 1618               	.LFB10:
+ 344:fat.c         **** 
+ 345:fat.c         **** uint8_t fat_fopen(const char *path)
+ 346:fat.c         **** {
+ 1619               		.loc 1 346 1 is_stmt 1 view -0
+ 1620               		.cfi_startproc
+ 1621               		.loc 1 346 1 is_stmt 0 view .LVU317
+ 1622 0756 1F93      		push r17
+ 1623               	.LCFI60:
+ 1624               		.cfi_def_cfa_offset 3
+ 1625               		.cfi_offset 17, -2
+ 1626 0758 CF93      		push r28
+ 1627               	.LCFI61:
+ 1628               		.cfi_def_cfa_offset 4
+ 1629               		.cfi_offset 28, -3
+ 1630 075a DF93      		push r29
+ 1631               	.LCFI62:
+ 1632               		.cfi_def_cfa_offset 5
+ 1633               		.cfi_offset 29, -4
+ 1634 075c CDB7      		in r28,__SP_L__
+ 1635 075e DEB7      		in r29,__SP_H__
+ 1636               	.LCFI63:
+ 1637               		.cfi_def_cfa_register 28
+ 1638 0760 EC97      		sbiw r28,60
+ 1639               	.LCFI64:
+ 1640               		.cfi_def_cfa_offset 65
+ 1641 0762 0FB6      		in __tmp_reg__,__SREG__
+ 1642 0764 F894      		cli
+ 1643 0766 DEBF      		out __SP_H__,r29
+ 1644 0768 0FBE      		out __SREG__,__tmp_reg__
+ 1645 076a CDBF      		out __SP_L__,r28
+ 1646               	/* prologue: function */
+ 1647               	/* frame size = 60 */
+ 1648               	/* stack size = 63 */
+ 1649               	.L__stack_usage = 63
+ 1650 076c AC01      		movw r20,r24
+ 347:fat.c         **** 	dir_t dj;
+ 1651               		.loc 1 347 2 is_stmt 1 view .LVU318
+ 348:fat.c         **** 	uint8_t sp[12], dir[32];
+ 1652               		.loc 1 348 2 view .LVU319
+ 349:fat.c         **** 	dj.fn = sp;
+ 1653               		.loc 1 349 2 view .LVU320
+ 1654               		.loc 1 349 8 is_stmt 0 view .LVU321
+ 1655 076e CE01      		movw r24,r28
+ 1656               	.LVL110:
+ 1657               		.loc 1 349 8 view .LVU322
+ 1658 0770 C196      		adiw r24,49
+ 1659 0772 9CA3      		std Y+36,r25
+ 1660 0774 8BA3      		std Y+35,r24
+ 350:fat.c         **** 	if(follow_path(&dj, dir, path))
+ 1661               		.loc 1 350 2 is_stmt 1 view .LVU323
+ 1662               		.loc 1 350 5 is_stmt 0 view .LVU324
+ 1663 0776 BE01      		movw r22,r28
+ 1664 0778 6F5F      		subi r22,-1
+ 1665 077a 7F4F      		sbci r23,-1
+ 1666 077c 4097      		sbiw r24,16
+ 1667 077e 0E94 0000 		call follow_path
+ 1668               	.LVL111:
+ 351:fat.c         **** 	{
+ 352:fat.c         **** 		return 1;
+ 353:fat.c         **** 	}
+ 354:fat.c         **** 
+ 355:fat.c         **** 	if(!dir[0] || (dir[DIR_ATTR] & AM_DIR))
+ 1669               		.loc 1 355 2 is_stmt 1 view .LVU325
+ 1670               		.loc 1 355 4 is_stmt 0 view .LVU326
+ 1671 0782 9981      		ldd r25,Y+1
+ 1672 0784 9923      		tst r25
+ 1673 0786 01F0      		breq .L79
+ 1674 0788 1C85      		ldd r17,Y+12
+ 1675 078a 1071      		andi r17,lo8(16)
+ 1676 078c 182B      		or r17,r24
+ 1677               		.loc 1 355 13 discriminator 1 view .LVU327
+ 1678 078e 01F4      		brne .L79
+ 356:fat.c         **** 	{
+ 357:fat.c         **** 		return 1;
+ 358:fat.c         **** 	}
+ 359:fat.c         **** 
+ 360:fat.c         **** 	_fs.org_clust = get_cluster(dir);
+ 1679               		.loc 1 360 2 is_stmt 1 view .LVU328
+ 1680               		.loc 1 360 18 is_stmt 0 view .LVU329
+ 1681 0790 CE01      		movw r24,r28
+ 1682 0792 0196      		adiw r24,1
+ 1683 0794 0E94 0000 		call get_cluster
+ 1684               	.LVL112:
+ 1685 0798 6093 0000 		sts _fs+19,r22
+ 1686 079c 7093 0000 		sts _fs+19+1,r23
+ 1687 07a0 8093 0000 		sts _fs+19+2,r24
+ 1688 07a4 9093 0000 		sts _fs+19+3,r25
+ 361:fat.c         **** 	fat_fsize = ld_u32(dir + DIR_FILESIZE);
+ 1689               		.loc 1 361 2 is_stmt 1 view .LVU330
+ 1690               		.loc 1 361 14 is_stmt 0 view .LVU331
+ 1691 07a8 CE01      		movw r24,r28
+ 1692 07aa 4D96      		adiw r24,29
+ 1693 07ac 0E94 0000 		call ld_u32
+ 1694               	.LVL113:
+ 1695 07b0 6093 0000 		sts fat_fsize,r22
+ 1696 07b4 7093 0000 		sts fat_fsize+1,r23
+ 1697 07b8 8093 0000 		sts fat_fsize+2,r24
+ 1698 07bc 9093 0000 		sts fat_fsize+3,r25
+ 362:fat.c         **** 	fat_ftell = 0;
+ 1699               		.loc 1 362 2 is_stmt 1 view .LVU332
+ 1700               		.loc 1 362 12 is_stmt 0 view .LVU333
+ 1701 07c0 1092 0000 		sts fat_ftell,__zero_reg__
+ 1702 07c4 1092 0000 		sts fat_ftell+1,__zero_reg__
+ 1703 07c8 1092 0000 		sts fat_ftell+2,__zero_reg__
+ 1704 07cc 1092 0000 		sts fat_ftell+3,__zero_reg__
+ 363:fat.c         **** 	return 0;
+ 1705               		.loc 1 363 2 is_stmt 1 view .LVU334
+ 1706               	.L76:
+ 364:fat.c         **** }
+ 1707               		.loc 1 364 1 is_stmt 0 view .LVU335
+ 1708 07d0 812F      		mov r24,r17
+ 1709               	/* epilogue start */
+ 1710 07d2 EC96      		adiw r28,60
+ 1711 07d4 0FB6      		in __tmp_reg__,__SREG__
+ 1712 07d6 F894      		cli
+ 1713 07d8 DEBF      		out __SP_H__,r29
+ 1714 07da 0FBE      		out __SREG__,__tmp_reg__
+ 1715 07dc CDBF      		out __SP_L__,r28
+ 1716 07de DF91      		pop r29
+ 1717 07e0 CF91      		pop r28
+ 1718 07e2 1F91      		pop r17
+ 1719 07e4 0895      		ret
+ 1720               	.L79:
+ 357:fat.c         **** 	}
+ 1721               		.loc 1 357 10 view .LVU336
+ 1722 07e6 11E0      		ldi r17,lo8(1)
+ 1723 07e8 00C0      		rjmp .L76
+ 1724               		.cfi_endproc
+ 1725               	.LFE10:
+ 1727               	.global	fat_fread
+ 1729               	fat_fread:
+ 1730               	.LVL114:
+ 1731               	.LFB11:
+ 365:fat.c         **** 
+ 366:fat.c         **** uint8_t fat_fread(void *buf, uint16_t btr, uint16_t *br)
+ 367:fat.c         **** {
+ 1732               		.loc 1 367 1 is_stmt 1 view -0
+ 1733               		.cfi_startproc
+ 1734               		.loc 1 367 1 is_stmt 0 view .LVU338
+ 1735 07ea 8F92      		push r8
+ 1736               	.LCFI65:
+ 1737               		.cfi_def_cfa_offset 3
+ 1738               		.cfi_offset 8, -2
+ 1739 07ec 9F92      		push r9
+ 1740               	.LCFI66:
+ 1741               		.cfi_def_cfa_offset 4
+ 1742               		.cfi_offset 9, -3
+ 1743 07ee AF92      		push r10
+ 1744               	.LCFI67:
+ 1745               		.cfi_def_cfa_offset 5
+ 1746               		.cfi_offset 10, -4
+ 1747 07f0 BF92      		push r11
+ 1748               	.LCFI68:
+ 1749               		.cfi_def_cfa_offset 6
+ 1750               		.cfi_offset 11, -5
+ 1751 07f2 CF92      		push r12
+ 1752               	.LCFI69:
+ 1753               		.cfi_def_cfa_offset 7
+ 1754               		.cfi_offset 12, -6
+ 1755 07f4 DF92      		push r13
+ 1756               	.LCFI70:
+ 1757               		.cfi_def_cfa_offset 8
+ 1758               		.cfi_offset 13, -7
+ 1759 07f6 EF92      		push r14
+ 1760               	.LCFI71:
+ 1761               		.cfi_def_cfa_offset 9
+ 1762               		.cfi_offset 14, -8
+ 1763 07f8 FF92      		push r15
+ 1764               	.LCFI72:
+ 1765               		.cfi_def_cfa_offset 10
+ 1766               		.cfi_offset 15, -9
+ 1767 07fa 0F93      		push r16
+ 1768               	.LCFI73:
+ 1769               		.cfi_def_cfa_offset 11
+ 1770               		.cfi_offset 16, -10
+ 1771 07fc 1F93      		push r17
+ 1772               	.LCFI74:
+ 1773               		.cfi_def_cfa_offset 12
+ 1774               		.cfi_offset 17, -11
+ 1775 07fe CF93      		push r28
+ 1776               	.LCFI75:
+ 1777               		.cfi_def_cfa_offset 13
+ 1778               		.cfi_offset 28, -12
+ 1779 0800 DF93      		push r29
+ 1780               	.LCFI76:
+ 1781               		.cfi_def_cfa_offset 14
+ 1782               		.cfi_offset 29, -13
+ 1783 0802 00D0      		rcall .
+ 1784 0804 00D0      		rcall .
+ 1785 0806 00D0      		rcall .
+ 1786               	.LCFI77:
+ 1787               		.cfi_def_cfa_offset 20
+ 1788 0808 CDB7      		in r28,__SP_L__
+ 1789 080a DEB7      		in r29,__SP_H__
+ 1790               	.LCFI78:
+ 1791               		.cfi_def_cfa_register 28
+ 1792               	/* prologue: function */
+ 1793               	/* frame size = 6 */
+ 1794               	/* stack size = 18 */
+ 1795               	.L__stack_usage = 18
+ 1796 080c 7C01      		movw r14,r24
+ 1797 080e 6D83      		std Y+5,r22
+ 1798 0810 7E83      		std Y+6,r23
+ 1799 0812 6A01      		movw r12,r20
+ 368:fat.c         **** 	uint32_t clst, sect, remain;
+ 1800               		.loc 1 368 2 is_stmt 1 view .LVU339
+ 369:fat.c         **** 	uint16_t rcnt;
+ 1801               		.loc 1 369 2 view .LVU340
+ 370:fat.c         **** 	uint8_t cs, *rbuf;
+ 1802               		.loc 1 370 2 view .LVU341
+ 371:fat.c         **** 	rbuf = buf;
+ 1803               		.loc 1 371 2 view .LVU342
+ 1804               	.LVL115:
+ 372:fat.c         **** 	*br = 0;
+ 1805               		.loc 1 372 2 view .LVU343
+ 1806               		.loc 1 372 6 is_stmt 0 view .LVU344
+ 1807 0814 DA01      		movw r26,r20
+ 1808 0816 1D92      		st X+,__zero_reg__
+ 1809 0818 1C92      		st X,__zero_reg__
+ 373:fat.c         **** 	remain = fat_fsize - fat_ftell;
+ 1810               		.loc 1 373 2 is_stmt 1 view .LVU345
+ 1811               		.loc 1 373 9 is_stmt 0 view .LVU346
+ 1812 081a 8091 0000 		lds r24,fat_fsize
+ 1813 081e 9091 0000 		lds r25,fat_fsize+1
+ 1814 0822 A091 0000 		lds r26,fat_fsize+2
+ 1815 0826 B091 0000 		lds r27,fat_fsize+3
+ 1816               	.LVL116:
+ 1817               		.loc 1 373 9 view .LVU347
+ 1818 082a 4091 0000 		lds r20,fat_ftell
+ 1819 082e 5091 0000 		lds r21,fat_ftell+1
+ 1820 0832 6091 0000 		lds r22,fat_ftell+2
+ 1821 0836 7091 0000 		lds r23,fat_ftell+3
+ 1822               	.LVL117:
+ 1823               		.loc 1 373 9 view .LVU348
+ 1824 083a 841B      		sub r24,r20
+ 1825 083c 950B      		sbc r25,r21
+ 1826 083e A60B      		sbc r26,r22
+ 1827 0840 B70B      		sbc r27,r23
+ 1828               	.LVL118:
+ 374:fat.c         **** 	if(btr > remain)
+ 1829               		.loc 1 374 2 is_stmt 1 view .LVU349
+ 1830               		.loc 1 374 9 is_stmt 0 view .LVU350
+ 1831 0842 ED81      		ldd r30,Y+5
+ 1832 0844 FE81      		ldd r31,Y+6
+ 1833 0846 AF01      		movw r20,r30
+ 1834 0848 70E0      		ldi r23,0
+ 1835 084a 60E0      		ldi r22,0
+ 1836               	.LVL119:
+ 1837               		.loc 1 374 4 view .LVU351
+ 1838 084c 8417      		cp r24,r20
+ 1839 084e 9507      		cpc r25,r21
+ 1840 0850 A607      		cpc r26,r22
+ 1841 0852 B707      		cpc r27,r23
+ 1842 0854 00F4      		brsh .L81
+ 375:fat.c         **** 	{
+ 376:fat.c         **** 		btr = (uint16_t)remain;
+ 1843               		.loc 1 376 3 is_stmt 1 view .LVU352
+ 1844               		.loc 1 376 7 is_stmt 0 view .LVU353
+ 1845 0856 9E83      		std Y+6,r25
+ 1846 0858 8D83      		std Y+5,r24
+ 1847               	.LVL120:
+ 1848               	.L81:
+ 377:fat.c         **** 	}
+ 378:fat.c         **** 
+ 379:fat.c         **** 	while(btr)
+ 380:fat.c         **** 	{
+ 381:fat.c         **** 		if((fat_ftell % 512) == 0)
+ 382:fat.c         **** 		{
+ 383:fat.c         **** 			if(!(cs = (uint8_t)(fat_ftell / 512 & (_fs.csize - 1))))
+ 384:fat.c         **** 			{
+ 385:fat.c         **** 				if((clst = fat_ftell ?
+ 386:fat.c         **** 					get_fat(_fs.curr_clust) : _fs.org_clust) <= 1)
+ 387:fat.c         **** 				{
+ 388:fat.c         **** 					return 1;
+ 389:fat.c         **** 				}
+ 390:fat.c         **** 
+ 391:fat.c         **** 				_fs.curr_clust = clst;
+ 392:fat.c         **** 			}
+ 393:fat.c         **** 
+ 394:fat.c         **** 			if(!(sect = clust2sect(_fs.curr_clust)))
+ 395:fat.c         **** 			{
+ 396:fat.c         **** 				return 1;
+ 397:fat.c         **** 			}
+ 398:fat.c         **** 
+ 399:fat.c         **** 			_fs.dsect = sect + cs;
+ 400:fat.c         **** 		}
+ 401:fat.c         **** 
+ 402:fat.c         **** 		if((rcnt = 512 - (uint16_t)fat_ftell % 512) > btr)
+ 1849               		.loc 1 402 12 view .LVU354
+ 1850 085a A12C      		mov r10,__zero_reg__
+ 1851 085c 32E0      		ldi r19,lo8(2)
+ 1852 085e B32E      		mov r11,r19
+ 1853               	.LVL121:
+ 1854               	.L82:
+ 379:fat.c         **** 	{
+ 1855               		.loc 1 379 7 view .LVU355
+ 1856 0860 2D81      		ldd r18,Y+5
+ 1857 0862 3E81      		ldd r19,Y+6
+ 1858 0864 232B      		or r18,r19
+ 1859 0866 01F4      		brne .L92
+ 403:fat.c         **** 		{
+ 404:fat.c         **** 			rcnt = btr;
+ 405:fat.c         **** 		}
+ 406:fat.c         **** 
+ 407:fat.c         **** 		if(sd_read(rbuf, _fs.dsect, (uint16_t)fat_ftell % 512, rcnt))
+ 408:fat.c         **** 		{
+ 409:fat.c         **** 			return 1;
+ 410:fat.c         **** 		}
+ 411:fat.c         **** 
+ 412:fat.c         **** 		fat_ftell += rcnt;
+ 413:fat.c         **** 		btr -= rcnt;
+ 414:fat.c         **** 		*br += rcnt;
+ 415:fat.c         **** 		if(rbuf)
+ 416:fat.c         **** 		{
+ 417:fat.c         **** 			rbuf += rcnt;
+ 418:fat.c         **** 		}
+ 419:fat.c         **** 	}
+ 420:fat.c         **** 
+ 421:fat.c         **** 	return 0;
+ 1860               		.loc 1 421 9 view .LVU356
+ 1861 0868 80E0      		ldi r24,0
+ 1862 086a 00C0      		rjmp .L80
+ 1863               	.L92:
+ 381:fat.c         **** 		{
+ 1864               		.loc 1 381 3 is_stmt 1 view .LVU357
+ 381:fat.c         **** 		{
+ 1865               		.loc 1 381 17 is_stmt 0 view .LVU358
+ 1866 086c 8091 0000 		lds r24,fat_ftell
+ 1867 0870 9091 0000 		lds r25,fat_ftell+1
+ 1868 0874 A091 0000 		lds r26,fat_ftell+2
+ 1869 0878 B091 0000 		lds r27,fat_ftell+3
+ 1870 087c AC01      		movw r20,r24
+ 1871 087e BD01      		movw r22,r26
+ 1872 0880 5170      		andi r21,1
+ 1873 0882 6627      		clr r22
+ 1874 0884 7727      		clr r23
+ 381:fat.c         **** 		{
+ 1875               		.loc 1 381 5 view .LVU359
+ 1876 0886 452B      		or r20,r21
+ 1877 0888 462B      		or r20,r22
+ 1878 088a 472B      		or r20,r23
+ 1879 088c 01F0      		breq .+2
+ 1880 088e 00C0      		rjmp .L83
+ 383:fat.c         **** 			{
+ 1881               		.loc 1 383 4 is_stmt 1 view .LVU360
+ 383:fat.c         **** 			{
+ 1882               		.loc 1 383 53 is_stmt 0 view .LVU361
+ 1883 0890 9090 0000 		lds r9,_fs
+ 1884 0894 9A94      		dec r9
+ 383:fat.c         **** 			{
+ 1885               		.loc 1 383 34 view .LVU362
+ 1886 0896 AC01      		movw r20,r24
+ 1887 0898 BD01      		movw r22,r26
+ 1888 089a 29E0      		ldi r18,9
+ 1889               		1:
+ 1890 089c 7695      		lsr r23
+ 1891 089e 6795      		ror r22
+ 1892 08a0 5795      		ror r21
+ 1893 08a2 4795      		ror r20
+ 1894 08a4 2A95      		dec r18
+ 1895 08a6 01F4      		brne 1b
+ 383:fat.c         **** 			{
+ 1896               		.loc 1 383 12 view .LVU363
+ 1897 08a8 9422      		and r9,r20
+ 1898               	.LVL122:
+ 383:fat.c         **** 			{
+ 1899               		.loc 1 383 6 view .LVU364
+ 1900 08aa 01F4      		brne .L84
+ 385:fat.c         **** 					get_fat(_fs.curr_clust) : _fs.org_clust) <= 1)
+ 1901               		.loc 1 385 5 is_stmt 1 view .LVU365
+ 386:fat.c         **** 				{
+ 1902               		.loc 1 386 30 is_stmt 0 view .LVU366
+ 1903 08ac 892B      		or r24,r25
+ 1904 08ae 8A2B      		or r24,r26
+ 1905 08b0 8B2B      		or r24,r27
+ 1906 08b2 01F0      		breq .L85
+ 386:fat.c         **** 				{
+ 1907               		.loc 1 386 6 discriminator 1 view .LVU367
+ 1908 08b4 2091 0000 		lds r18,_fs+23
+ 1909 08b8 3091 0000 		lds r19,_fs+23+1
+ 1910 08bc 4091 0000 		lds r20,_fs+23+2
+ 1911 08c0 5091 0000 		lds r21,_fs+23+3
+ 1912 08c4 CA01      		movw r24,r20
+ 1913 08c6 B901      		movw r22,r18
+ 1914 08c8 0E94 0000 		call get_fat
+ 1915               	.LVL123:
+ 1916 08cc 462F      		mov r20,r22
+ 1917 08ce 572F      		mov r21,r23
+ 1918 08d0 BC01      		movw r22,r24
+ 1919               	.L86:
+ 1920               	.LVL124:
+ 385:fat.c         **** 					get_fat(_fs.curr_clust) : _fs.org_clust) <= 1)
+ 1921               		.loc 1 385 7 view .LVU368
+ 1922 08d2 4230      		cpi r20,2
+ 1923 08d4 5105      		cpc r21,__zero_reg__
+ 1924 08d6 6105      		cpc r22,__zero_reg__
+ 1925 08d8 7105      		cpc r23,__zero_reg__
+ 1926 08da 00F4      		brsh .L87
+ 1927               	.LVL125:
+ 1928               	.L89:
+ 388:fat.c         **** 				}
+ 1929               		.loc 1 388 13 view .LVU369
+ 1930 08dc 81E0      		ldi r24,lo8(1)
+ 1931               	.L80:
+ 1932               	/* epilogue start */
+ 422:fat.c         **** }
+ 1933               		.loc 1 422 1 view .LVU370
+ 1934 08de 2696      		adiw r28,6
+ 1935               	.LVL126:
+ 1936               		.loc 1 422 1 view .LVU371
+ 1937 08e0 0FB6      		in __tmp_reg__,__SREG__
+ 1938 08e2 F894      		cli
+ 1939 08e4 DEBF      		out __SP_H__,r29
+ 1940 08e6 0FBE      		out __SREG__,__tmp_reg__
+ 1941 08e8 CDBF      		out __SP_L__,r28
+ 1942               	.LVL127:
+ 1943               		.loc 1 422 1 view .LVU372
+ 1944 08ea DF91      		pop r29
+ 1945 08ec CF91      		pop r28
+ 1946 08ee 1F91      		pop r17
+ 1947 08f0 0F91      		pop r16
+ 1948 08f2 FF90      		pop r15
+ 1949 08f4 EF90      		pop r14
+ 1950               	.LVL128:
+ 1951               		.loc 1 422 1 view .LVU373
+ 1952 08f6 DF90      		pop r13
+ 1953 08f8 CF90      		pop r12
+ 1954               	.LVL129:
+ 1955               		.loc 1 422 1 view .LVU374
+ 1956 08fa BF90      		pop r11
+ 1957 08fc AF90      		pop r10
+ 1958 08fe 9F90      		pop r9
+ 1959 0900 8F90      		pop r8
+ 1960 0902 0895      		ret
+ 1961               	.LVL130:
+ 1962               	.L85:
+ 386:fat.c         **** 				{
+ 1963               		.loc 1 386 30 discriminator 2 view .LVU375
+ 1964 0904 4091 0000 		lds r20,_fs+19
+ 1965 0908 5091 0000 		lds r21,_fs+19+1
+ 1966 090c 6091 0000 		lds r22,_fs+19+2
+ 1967 0910 7091 0000 		lds r23,_fs+19+3
+ 1968 0914 00C0      		rjmp .L86
+ 1969               	.LVL131:
+ 1970               	.L87:
+ 391:fat.c         **** 			}
+ 1971               		.loc 1 391 5 is_stmt 1 view .LVU376
+ 391:fat.c         **** 			}
+ 1972               		.loc 1 391 20 is_stmt 0 view .LVU377
+ 1973 0916 4093 0000 		sts _fs+23,r20
+ 1974 091a 5093 0000 		sts _fs+23+1,r21
+ 1975 091e 6093 0000 		sts _fs+23+2,r22
+ 1976 0922 7093 0000 		sts _fs+23+3,r23
+ 1977               	.LVL132:
+ 1978               	.L84:
+ 394:fat.c         **** 			{
+ 1979               		.loc 1 394 4 is_stmt 1 view .LVU378
+ 394:fat.c         **** 			{
+ 1980               		.loc 1 394 16 is_stmt 0 view .LVU379
+ 1981 0926 8091 0000 		lds r24,_fs+23
+ 1982 092a 9091 0000 		lds r25,_fs+23+1
+ 1983 092e A091 0000 		lds r26,_fs+23+2
+ 1984 0932 B091 0000 		lds r27,_fs+23+3
+ 1985 0936 8983      		std Y+1,r24
+ 1986 0938 9A83      		std Y+2,r25
+ 1987 093a AB83      		std Y+3,r26
+ 1988 093c BC83      		std Y+4,r27
+ 1989 093e BC01      		movw r22,r24
+ 1990 0940 CD01      		movw r24,r26
+ 1991 0942 0E94 0000 		call clust2sect
+ 1992               	.LVL133:
+ 1993 0946 462F      		mov r20,r22
+ 1994 0948 572F      		mov r21,r23
+ 1995 094a BC01      		movw r22,r24
+ 1996               	.LVL134:
+ 394:fat.c         **** 			{
+ 1997               		.loc 1 394 6 view .LVU380
+ 1998 094c 4115      		cp r20,__zero_reg__
+ 1999 094e 5105      		cpc r21,__zero_reg__
+ 2000 0950 6105      		cpc r22,__zero_reg__
+ 2001 0952 7105      		cpc r23,__zero_reg__
+ 2002 0954 01F0      		breq .L89
+ 399:fat.c         **** 		}
+ 2003               		.loc 1 399 4 is_stmt 1 view .LVU381
+ 399:fat.c         **** 		}
+ 2004               		.loc 1 399 21 is_stmt 0 view .LVU382
+ 2005 0956 490D      		add r20,r9
+ 2006 0958 511D      		adc r21,__zero_reg__
+ 2007 095a 611D      		adc r22,__zero_reg__
+ 2008 095c 711D      		adc r23,__zero_reg__
+ 2009               	.LVL135:
+ 399:fat.c         **** 		}
+ 2010               		.loc 1 399 14 view .LVU383
+ 2011 095e 4093 0000 		sts _fs+27,r20
+ 2012 0962 5093 0000 		sts _fs+27+1,r21
+ 2013 0966 6093 0000 		sts _fs+27+2,r22
+ 2014 096a 7093 0000 		sts _fs+27+3,r23
+ 2015               	.LVL136:
+ 2016               	.L83:
+ 402:fat.c         **** 		{
+ 2017               		.loc 1 402 3 is_stmt 1 view .LVU384
+ 402:fat.c         **** 		{
+ 2018               		.loc 1 402 40 is_stmt 0 view .LVU385
+ 2019 096e 2091 0000 		lds r18,fat_ftell
+ 2020 0972 3091 0000 		lds r19,fat_ftell+1
+ 2021 0976 3170      		andi r19,1
+ 402:fat.c         **** 		{
+ 2022               		.loc 1 402 12 view .LVU386
+ 2023 0978 C501      		movw r24,r10
+ 2024 097a 821B      		sub r24,r18
+ 2025 097c 930B      		sbc r25,r19
+ 2026               	.LVL137:
+ 402:fat.c         **** 		{
+ 2027               		.loc 1 402 12 view .LVU387
+ 2028 097e 8D80      		ldd r8,Y+5
+ 2029 0980 9E80      		ldd r9,Y+6
+ 2030 0982 8815      		cp r24,r8
+ 2031 0984 9905      		cpc r25,r9
+ 2032 0986 00F4      		brsh .L90
+ 2033 0988 4C01      		movw r8,r24
+ 2034               	.L90:
+ 2035               	.LVL138:
+ 407:fat.c         **** 		{
+ 2036               		.loc 1 407 3 is_stmt 1 view .LVU388
+ 407:fat.c         **** 		{
+ 2037               		.loc 1 407 6 is_stmt 0 view .LVU389
+ 2038 098a 4091 0000 		lds r20,_fs+27
+ 2039 098e 5091 0000 		lds r21,_fs+27+1
+ 2040 0992 6091 0000 		lds r22,_fs+27+2
+ 2041 0996 7091 0000 		lds r23,_fs+27+3
+ 2042 099a 8401      		movw r16,r8
+ 2043 099c C701      		movw r24,r14
+ 2044 099e 0E94 0000 		call sd_read
+ 2045               	.LVL139:
+ 407:fat.c         **** 		{
+ 2046               		.loc 1 407 5 view .LVU390
+ 2047 09a2 8111      		cpse r24,__zero_reg__
+ 2048 09a4 00C0      		rjmp .L89
+ 412:fat.c         **** 		btr -= rcnt;
+ 2049               		.loc 1 412 3 is_stmt 1 view .LVU391
+ 412:fat.c         **** 		btr -= rcnt;
+ 2050               		.loc 1 412 13 is_stmt 0 view .LVU392
+ 2051 09a6 8091 0000 		lds r24,fat_ftell
+ 2052 09aa 9091 0000 		lds r25,fat_ftell+1
+ 2053 09ae A091 0000 		lds r26,fat_ftell+2
+ 2054 09b2 B091 0000 		lds r27,fat_ftell+3
+ 2055 09b6 880D      		add r24,r8
+ 2056 09b8 991D      		adc r25,r9
+ 2057 09ba A11D      		adc r26,__zero_reg__
+ 2058 09bc B11D      		adc r27,__zero_reg__
+ 2059 09be 8093 0000 		sts fat_ftell,r24
+ 2060 09c2 9093 0000 		sts fat_ftell+1,r25
+ 2061 09c6 A093 0000 		sts fat_ftell+2,r26
+ 2062 09ca B093 0000 		sts fat_ftell+3,r27
+ 413:fat.c         **** 		*br += rcnt;
+ 2063               		.loc 1 413 3 is_stmt 1 view .LVU393
+ 413:fat.c         **** 		*br += rcnt;
+ 2064               		.loc 1 413 7 is_stmt 0 view .LVU394
+ 2065 09ce AD81      		ldd r26,Y+5
+ 2066 09d0 BE81      		ldd r27,Y+6
+ 2067 09d2 A819      		sub r26,r8
+ 2068 09d4 B909      		sbc r27,r9
+ 2069 09d6 BE83      		std Y+6,r27
+ 2070 09d8 AD83      		std Y+5,r26
+ 2071               	.LVL140:
+ 414:fat.c         **** 		if(rbuf)
+ 2072               		.loc 1 414 3 is_stmt 1 view .LVU395
+ 414:fat.c         **** 		if(rbuf)
+ 2073               		.loc 1 414 7 is_stmt 0 view .LVU396
+ 2074 09da F601      		movw r30,r12
+ 2075 09dc 8081      		ld r24,Z
+ 2076 09de 9181      		ldd r25,Z+1
+ 2077 09e0 880D      		add r24,r8
+ 2078 09e2 991D      		adc r25,r9
+ 2079 09e4 9183      		std Z+1,r25
+ 2080 09e6 8083      		st Z,r24
+ 415:fat.c         **** 		{
+ 2081               		.loc 1 415 3 is_stmt 1 view .LVU397
+ 415:fat.c         **** 		{
+ 2082               		.loc 1 415 5 is_stmt 0 view .LVU398
+ 2083 09e8 E114      		cp r14,__zero_reg__
+ 2084 09ea F104      		cpc r15,__zero_reg__
+ 2085 09ec 01F4      		brne .+2
+ 2086 09ee 00C0      		rjmp .L82
+ 417:fat.c         **** 		}
+ 2087               		.loc 1 417 4 is_stmt 1 view .LVU399
+ 417:fat.c         **** 		}
+ 2088               		.loc 1 417 9 is_stmt 0 view .LVU400
+ 2089 09f0 E80C      		add r14,r8
+ 2090 09f2 F91C      		adc r15,r9
+ 2091               	.LVL141:
+ 417:fat.c         **** 		}
+ 2092               		.loc 1 417 9 view .LVU401
+ 2093 09f4 00C0      		rjmp .L82
+ 2094               		.cfi_endproc
+ 2095               	.LFE11:
+ 2097               	.global	fat_fseek
+ 2099               	fat_fseek:
+ 2100               	.LVL142:
+ 2101               	.LFB12:
+ 423:fat.c         **** 
+ 424:fat.c         **** uint8_t fat_fseek(uint32_t offset)
+ 425:fat.c         **** {
+ 2102               		.loc 1 425 1 is_stmt 1 view -0
+ 2103               		.cfi_startproc
+ 2104               		.loc 1 425 1 is_stmt 0 view .LVU403
+ 2105 09f6 4F92      		push r4
+ 2106               	.LCFI79:
+ 2107               		.cfi_def_cfa_offset 3
+ 2108               		.cfi_offset 4, -2
+ 2109 09f8 5F92      		push r5
+ 2110               	.LCFI80:
+ 2111               		.cfi_def_cfa_offset 4
+ 2112               		.cfi_offset 5, -3
+ 2113 09fa 6F92      		push r6
+ 2114               	.LCFI81:
+ 2115               		.cfi_def_cfa_offset 5
+ 2116               		.cfi_offset 6, -4
+ 2117 09fc 7F92      		push r7
+ 2118               	.LCFI82:
+ 2119               		.cfi_def_cfa_offset 6
+ 2120               		.cfi_offset 7, -5
+ 2121 09fe 8F92      		push r8
+ 2122               	.LCFI83:
+ 2123               		.cfi_def_cfa_offset 7
+ 2124               		.cfi_offset 8, -6
+ 2125 0a00 9F92      		push r9
+ 2126               	.LCFI84:
+ 2127               		.cfi_def_cfa_offset 8
+ 2128               		.cfi_offset 9, -7
+ 2129 0a02 AF92      		push r10
+ 2130               	.LCFI85:
+ 2131               		.cfi_def_cfa_offset 9
+ 2132               		.cfi_offset 10, -8
+ 2133 0a04 BF92      		push r11
+ 2134               	.LCFI86:
+ 2135               		.cfi_def_cfa_offset 10
+ 2136               		.cfi_offset 11, -9
+ 2137 0a06 CF92      		push r12
+ 2138               	.LCFI87:
+ 2139               		.cfi_def_cfa_offset 11
+ 2140               		.cfi_offset 12, -10
+ 2141 0a08 DF92      		push r13
+ 2142               	.LCFI88:
+ 2143               		.cfi_def_cfa_offset 12
+ 2144               		.cfi_offset 13, -11
+ 2145 0a0a EF92      		push r14
+ 2146               	.LCFI89:
+ 2147               		.cfi_def_cfa_offset 13
+ 2148               		.cfi_offset 14, -12
+ 2149 0a0c FF92      		push r15
+ 2150               	.LCFI90:
+ 2151               		.cfi_def_cfa_offset 14
+ 2152               		.cfi_offset 15, -13
+ 2153 0a0e 0F93      		push r16
+ 2154               	.LCFI91:
+ 2155               		.cfi_def_cfa_offset 15
+ 2156               		.cfi_offset 16, -14
+ 2157 0a10 1F93      		push r17
+ 2158               	.LCFI92:
+ 2159               		.cfi_def_cfa_offset 16
+ 2160               		.cfi_offset 17, -15
+ 2161 0a12 CF93      		push r28
+ 2162               	.LCFI93:
+ 2163               		.cfi_def_cfa_offset 17
+ 2164               		.cfi_offset 28, -16
+ 2165 0a14 DF93      		push r29
+ 2166               	.LCFI94:
+ 2167               		.cfi_def_cfa_offset 18
+ 2168               		.cfi_offset 29, -17
+ 2169 0a16 CDB7      		in r28,__SP_L__
+ 2170 0a18 DEB7      		in r29,__SP_H__
+ 2171               	.LCFI95:
+ 2172               		.cfi_def_cfa_register 28
+ 2173 0a1a 2897      		sbiw r28,8
+ 2174               	.LCFI96:
+ 2175               		.cfi_def_cfa_offset 26
+ 2176 0a1c 0FB6      		in __tmp_reg__,__SREG__
+ 2177 0a1e F894      		cli
+ 2178 0a20 DEBF      		out __SP_H__,r29
+ 2179 0a22 0FBE      		out __SREG__,__tmp_reg__
+ 2180 0a24 CDBF      		out __SP_L__,r28
+ 2181               	/* prologue: function */
+ 2182               	/* frame size = 8 */
+ 2183               	/* stack size = 24 */
+ 2184               	.L__stack_usage = 24
+ 2185 0a26 462F      		mov r20,r22
+ 2186 0a28 572F      		mov r21,r23
+ 2187 0a2a BC01      		movw r22,r24
+ 2188               	.LVL143:
+ 426:fat.c         **** 	uint32_t clst, bcs, sect, ifptr;
+ 2189               		.loc 1 426 2 is_stmt 1 view .LVU404
+ 427:fat.c         **** 	if(offset > fat_fsize)
+ 2190               		.loc 1 427 2 view .LVU405
+ 2191 0a2c C090 0000 		lds r12,fat_fsize
+ 2192 0a30 D090 0000 		lds r13,fat_fsize+1
+ 2193 0a34 E090 0000 		lds r14,fat_fsize+2
+ 2194 0a38 F090 0000 		lds r15,fat_fsize+3
+ 2195 0a3c 4C15      		cp r20,r12
+ 2196 0a3e 5D05      		cpc r21,r13
+ 2197 0a40 6E05      		cpc r22,r14
+ 2198 0a42 7F05      		cpc r23,r15
+ 2199 0a44 00F4      		brsh .L100
+ 2200 0a46 6A01      		movw r12,r20
+ 2201 0a48 7C01      		movw r14,r24
+ 2202               	.L100:
+ 2203               	.LVL144:
+ 428:fat.c         **** 	{
+ 429:fat.c         **** 		offset = fat_fsize;
+ 430:fat.c         **** 	}
+ 431:fat.c         **** 
+ 432:fat.c         **** 	ifptr = fat_ftell;
+ 2204               		.loc 1 432 2 view .LVU406
+ 2205               		.loc 1 432 8 is_stmt 0 view .LVU407
+ 2206 0a4a 8091 0000 		lds r24,fat_ftell
+ 2207 0a4e 9091 0000 		lds r25,fat_ftell+1
+ 2208 0a52 A091 0000 		lds r26,fat_ftell+2
+ 2209 0a56 B091 0000 		lds r27,fat_ftell+3
+ 2210               	.LVL145:
+ 433:fat.c         **** 	fat_ftell = 0;
+ 2211               		.loc 1 433 2 is_stmt 1 view .LVU408
+ 2212               		.loc 1 433 12 is_stmt 0 view .LVU409
+ 2213 0a5a 1092 0000 		sts fat_ftell,__zero_reg__
+ 2214 0a5e 1092 0000 		sts fat_ftell+1,__zero_reg__
+ 2215 0a62 1092 0000 		sts fat_ftell+2,__zero_reg__
+ 2216 0a66 1092 0000 		sts fat_ftell+3,__zero_reg__
+ 434:fat.c         **** 	if(offset > 0)
+ 2217               		.loc 1 434 2 is_stmt 1 view .LVU410
+ 2218               		.loc 1 434 4 is_stmt 0 view .LVU411
+ 2219 0a6a C114      		cp r12,__zero_reg__
+ 2220 0a6c D104      		cpc r13,__zero_reg__
+ 2221 0a6e E104      		cpc r14,__zero_reg__
+ 2222 0a70 F104      		cpc r15,__zero_reg__
+ 2223 0a72 01F4      		brne .+2
+ 2224 0a74 00C0      		rjmp .L108
+ 435:fat.c         **** 	{
+ 436:fat.c         **** 		bcs = (uint32_t)_fs.csize * 512;
+ 2225               		.loc 1 436 3 is_stmt 1 view .LVU412
+ 2226               		.loc 1 436 9 is_stmt 0 view .LVU413
+ 2227 0a76 8090 0000 		lds r8,_fs
+ 2228 0a7a 912C      		mov r9,__zero_reg__
+ 2229 0a7c B12C      		mov r11,__zero_reg__
+ 2230 0a7e A12C      		mov r10,__zero_reg__
+ 2231               		.loc 1 436 7 view .LVU414
+ 2232 0a80 39E0      		ldi r19,9
+ 2233               		1:
+ 2234 0a82 880C      		lsl r8
+ 2235 0a84 991C      		rol r9
+ 2236 0a86 AA1C      		rol r10
+ 2237 0a88 BB1C      		rol r11
+ 2238 0a8a 3A95      		dec r19
+ 2239 0a8c 01F4      		brne 1b
+ 2240               	.LVL146:
+ 437:fat.c         **** 		if(ifptr > 0 && (offset - 1) / bcs >= (ifptr - 1) / bcs)
+ 2241               		.loc 1 437 3 is_stmt 1 view .LVU415
+ 2242               		.loc 1 437 5 is_stmt 0 view .LVU416
+ 2243 0a8e 0097      		sbiw r24,0
+ 2244 0a90 A105      		cpc r26,__zero_reg__
+ 2245 0a92 B105      		cpc r27,__zero_reg__
+ 2246 0a94 01F4      		brne .+2
+ 2247 0a96 00C0      		rjmp .L102
+ 2248               		.loc 1 437 48 discriminator 1 view .LVU417
+ 2249 0a98 9C01      		movw r18,r24
+ 2250 0a9a AD01      		movw r20,r26
+ 2251 0a9c 2150      		subi r18,1
+ 2252 0a9e 3109      		sbc r19,__zero_reg__
+ 2253 0aa0 4109      		sbc r20,__zero_reg__
+ 2254 0aa2 5109      		sbc r21,__zero_reg__
+ 2255 0aa4 2983      		std Y+1,r18
+ 2256 0aa6 3A83      		std Y+2,r19
+ 2257 0aa8 4B83      		std Y+3,r20
+ 2258 0aaa 5C83      		std Y+4,r21
+ 2259               		.loc 1 437 27 discriminator 1 view .LVU418
+ 2260 0aac D701      		movw r26,r14
+ 2261 0aae C601      		movw r24,r12
+ 2262               	.LVL147:
+ 2263               		.loc 1 437 27 discriminator 1 view .LVU419
+ 2264 0ab0 0197      		sbiw r24,1
+ 2265 0ab2 A109      		sbc r26,__zero_reg__
+ 2266 0ab4 B109      		sbc r27,__zero_reg__
+ 2267               		.loc 1 437 32 discriminator 1 view .LVU420
+ 2268 0ab6 BC01      		movw r22,r24
+ 2269 0ab8 CD01      		movw r24,r26
+ 2270 0aba A501      		movw r20,r10
+ 2271 0abc 9401      		movw r18,r8
+ 2272 0abe 0E94 0000 		call __udivmodsi4
+ 2273 0ac2 2901      		movw r4,r18
+ 2274 0ac4 3A01      		movw r6,r20
+ 2275               		.loc 1 437 53 discriminator 1 view .LVU421
+ 2276 0ac6 6981      		ldd r22,Y+1
+ 2277 0ac8 7A81      		ldd r23,Y+2
+ 2278 0aca 8B81      		ldd r24,Y+3
+ 2279 0acc 9C81      		ldd r25,Y+4
+ 2280 0ace A501      		movw r20,r10
+ 2281 0ad0 9401      		movw r18,r8
+ 2282 0ad2 0E94 0000 		call __udivmodsi4
+ 2283               		.loc 1 437 16 discriminator 1 view .LVU422
+ 2284 0ad6 4216      		cp r4,r18
+ 2285 0ad8 5306      		cpc r5,r19
+ 2286 0ada 6406      		cpc r6,r20
+ 2287 0adc 7506      		cpc r7,r21
+ 2288 0ade 00F4      		brsh .+2
+ 2289 0ae0 00C0      		rjmp .L102
+ 438:fat.c         **** 		{
+ 439:fat.c         **** 			fat_ftell = (ifptr - 1) & ~(bcs - 1);
+ 2290               		.loc 1 439 4 is_stmt 1 view .LVU423
+ 2291               		.loc 1 439 30 is_stmt 0 view .LVU424
+ 2292 0ae2 8827      		clr r24
+ 2293 0ae4 9927      		clr r25
+ 2294 0ae6 DC01      		movw r26,r24
+ 2295 0ae8 8819      		sub r24,r8
+ 2296 0aea 9909      		sbc r25,r9
+ 2297 0aec AA09      		sbc r26,r10
+ 2298 0aee BB09      		sbc r27,r11
+ 2299               		.loc 1 439 28 view .LVU425
+ 2300 0af0 2981      		ldd r18,Y+1
+ 2301 0af2 3A81      		ldd r19,Y+2
+ 2302 0af4 4B81      		ldd r20,Y+3
+ 2303 0af6 5C81      		ldd r21,Y+4
+ 2304 0af8 8223      		and r24,r18
+ 2305 0afa 9323      		and r25,r19
+ 2306 0afc A423      		and r26,r20
+ 2307 0afe B523      		and r27,r21
+ 2308               		.loc 1 439 14 view .LVU426
+ 2309 0b00 8093 0000 		sts fat_ftell,r24
+ 2310 0b04 9093 0000 		sts fat_ftell+1,r25
+ 2311 0b08 A093 0000 		sts fat_ftell+2,r26
+ 2312 0b0c B093 0000 		sts fat_ftell+3,r27
+ 440:fat.c         **** 			offset -= fat_ftell;
+ 2313               		.loc 1 440 4 is_stmt 1 view .LVU427
+ 2314               		.loc 1 440 11 is_stmt 0 view .LVU428
+ 2315 0b10 C81A      		sub r12,r24
+ 2316 0b12 D90A      		sbc r13,r25
+ 2317 0b14 EA0A      		sbc r14,r26
+ 2318 0b16 FB0A      		sbc r15,r27
+ 2319               	.LVL148:
+ 441:fat.c         **** 			clst = _fs.curr_clust;
+ 2320               		.loc 1 441 4 is_stmt 1 view .LVU429
+ 2321               		.loc 1 441 9 is_stmt 0 view .LVU430
+ 2322 0b18 6091 0000 		lds r22,_fs+23
+ 2323 0b1c 7091 0000 		lds r23,_fs+23+1
+ 2324 0b20 8091 0000 		lds r24,_fs+23+2
+ 2325 0b24 9091 0000 		lds r25,_fs+23+3
+ 2326               	.LVL149:
+ 2327               	.L104:
+ 442:fat.c         **** 		}
+ 443:fat.c         **** 		else
+ 444:fat.c         **** 		{
+ 445:fat.c         **** 			clst = _fs.org_clust;
+ 446:fat.c         **** 			_fs.curr_clust = clst;
+ 447:fat.c         **** 		}
+ 448:fat.c         **** 
+ 449:fat.c         **** 		while(offset > bcs)
+ 2328               		.loc 1 449 8 view .LVU431
+ 2329 0b28 8C14      		cp r8,r12
+ 2330 0b2a 9D04      		cpc r9,r13
+ 2331 0b2c AE04      		cpc r10,r14
+ 2332 0b2e BF04      		cpc r11,r15
+ 2333 0b30 00F4      		brsh .+2
+ 2334 0b32 00C0      		rjmp .L107
+ 450:fat.c         **** 		{
+ 451:fat.c         **** 			clst = get_fat(clst);
+ 452:fat.c         **** 			if(clst <= 1 || clst >= _fs.n_fatent)
+ 453:fat.c         **** 			{
+ 454:fat.c         **** 				return 1;
+ 455:fat.c         **** 			}
+ 456:fat.c         **** 
+ 457:fat.c         **** 			_fs.curr_clust = clst;
+ 458:fat.c         **** 			fat_ftell += bcs;
+ 459:fat.c         **** 			offset -= bcs;
+ 460:fat.c         **** 		}
+ 461:fat.c         **** 
+ 462:fat.c         **** 		fat_ftell += offset;
+ 2335               		.loc 1 462 3 is_stmt 1 view .LVU432
+ 2336               		.loc 1 462 13 is_stmt 0 view .LVU433
+ 2337 0b34 0091 0000 		lds r16,fat_ftell
+ 2338 0b38 1091 0000 		lds r17,fat_ftell+1
+ 2339 0b3c 2091 0000 		lds r18,fat_ftell+2
+ 2340 0b40 3091 0000 		lds r19,fat_ftell+3
+ 2341 0b44 C00E      		add r12,r16
+ 2342 0b46 D11E      		adc r13,r17
+ 2343 0b48 E21E      		adc r14,r18
+ 2344 0b4a F31E      		adc r15,r19
+ 2345               	.LVL150:
+ 2346               		.loc 1 462 13 view .LVU434
+ 2347 0b4c C092 0000 		sts fat_ftell,r12
+ 2348 0b50 D092 0000 		sts fat_ftell+1,r13
+ 2349 0b54 E092 0000 		sts fat_ftell+2,r14
+ 2350 0b58 F092 0000 		sts fat_ftell+3,r15
+ 463:fat.c         **** 		if(!(sect = clust2sect(clst)))
+ 2351               		.loc 1 463 3 is_stmt 1 view .LVU435
+ 2352               		.loc 1 463 15 is_stmt 0 view .LVU436
+ 2353 0b5c 0E94 0000 		call clust2sect
+ 2354               	.LVL151:
+ 2355               		.loc 1 463 15 view .LVU437
+ 2356 0b60 462F      		mov r20,r22
+ 2357 0b62 572F      		mov r21,r23
+ 2358 0b64 BC01      		movw r22,r24
+ 2359               	.LVL152:
+ 2360               		.loc 1 463 5 view .LVU438
+ 2361 0b66 4115      		cp r20,__zero_reg__
+ 2362 0b68 5105      		cpc r21,__zero_reg__
+ 2363 0b6a 6105      		cpc r22,__zero_reg__
+ 2364 0b6c 7105      		cpc r23,__zero_reg__
+ 2365 0b6e 01F0      		breq .L106
+ 464:fat.c         **** 		{
+ 465:fat.c         **** 			return 1;
+ 466:fat.c         **** 		}
+ 467:fat.c         **** 
+ 468:fat.c         **** 		_fs.dsect = sect + (fat_ftell / 512 & (_fs.csize - 1));
+ 2366               		.loc 1 468 3 is_stmt 1 view .LVU439
+ 2367               		.loc 1 468 45 is_stmt 0 view .LVU440
+ 2368 0b70 8091 0000 		lds r24,_fs
+ 2369               		.loc 1 468 52 view .LVU441
+ 2370 0b74 8150      		subi r24,1
+ 2371 0b76 990B      		sbc r25,r25
+ 2372 0b78 092E      		mov __tmp_reg__,r25
+ 2373 0b7a 000C      		lsl r0
+ 2374 0b7c AA0B      		sbc r26,r26
+ 2375 0b7e BB0B      		sbc r27,r27
+ 2376               		.loc 1 468 33 view .LVU442
+ 2377 0b80 29E0      		ldi r18,9
+ 2378               		1:
+ 2379 0b82 F694      		lsr r15
+ 2380 0b84 E794      		ror r14
+ 2381 0b86 D794      		ror r13
+ 2382 0b88 C794      		ror r12
+ 2383 0b8a 2A95      		dec r18
+ 2384 0b8c 01F4      		brne 1b
+ 2385               		.loc 1 468 39 view .LVU443
+ 2386 0b8e 8C21      		and r24,r12
+ 2387 0b90 9D21      		and r25,r13
+ 2388 0b92 AE21      		and r26,r14
+ 2389 0b94 BF21      		and r27,r15
+ 2390               		.loc 1 468 20 view .LVU444
+ 2391 0b96 6C01      		movw r12,r24
+ 2392 0b98 7D01      		movw r14,r26
+ 2393 0b9a C40E      		add r12,r20
+ 2394 0b9c D51E      		adc r13,r21
+ 2395 0b9e E61E      		adc r14,r22
+ 2396 0ba0 F71E      		adc r15,r23
+ 2397               		.loc 1 468 13 view .LVU445
+ 2398 0ba2 C092 0000 		sts _fs+27,r12
+ 2399 0ba6 D092 0000 		sts _fs+27+1,r13
+ 2400 0baa E092 0000 		sts _fs+27+2,r14
+ 2401 0bae F092 0000 		sts _fs+27+3,r15
+ 2402               	.LVL153:
+ 2403               	.L108:
+ 469:fat.c         **** 	}
+ 470:fat.c         **** 
+ 471:fat.c         **** 	return 0;
+ 2404               		.loc 1 471 9 view .LVU446
+ 2405 0bb2 80E0      		ldi r24,0
+ 2406 0bb4 00C0      		rjmp .L99
+ 2407               	.LVL154:
+ 2408               	.L102:
+ 445:fat.c         **** 			_fs.curr_clust = clst;
+ 2409               		.loc 1 445 4 is_stmt 1 view .LVU447
+ 445:fat.c         **** 			_fs.curr_clust = clst;
+ 2410               		.loc 1 445 9 is_stmt 0 view .LVU448
+ 2411 0bb6 6091 0000 		lds r22,_fs+19
+ 2412 0bba 7091 0000 		lds r23,_fs+19+1
+ 2413 0bbe 8091 0000 		lds r24,_fs+19+2
+ 2414 0bc2 9091 0000 		lds r25,_fs+19+3
+ 2415               	.LVL155:
+ 446:fat.c         **** 		}
+ 2416               		.loc 1 446 4 is_stmt 1 view .LVU449
+ 446:fat.c         **** 		}
+ 2417               		.loc 1 446 19 is_stmt 0 view .LVU450
+ 2418 0bc6 6093 0000 		sts _fs+23,r22
+ 2419 0bca 7093 0000 		sts _fs+23+1,r23
+ 2420 0bce 8093 0000 		sts _fs+23+2,r24
+ 2421 0bd2 9093 0000 		sts _fs+23+3,r25
+ 2422 0bd6 00C0      		rjmp .L104
+ 2423               	.L107:
+ 451:fat.c         **** 			if(clst <= 1 || clst >= _fs.n_fatent)
+ 2424               		.loc 1 451 4 is_stmt 1 view .LVU451
+ 451:fat.c         **** 			if(clst <= 1 || clst >= _fs.n_fatent)
+ 2425               		.loc 1 451 11 is_stmt 0 view .LVU452
+ 2426 0bd8 0E94 0000 		call get_fat
+ 2427               	.LVL156:
+ 452:fat.c         **** 			{
+ 2428               		.loc 1 452 4 is_stmt 1 view .LVU453
+ 452:fat.c         **** 			{
+ 2429               		.loc 1 452 6 is_stmt 0 view .LVU454
+ 2430 0bdc 6230      		cpi r22,2
+ 2431 0bde 7105      		cpc r23,__zero_reg__
+ 2432 0be0 8105      		cpc r24,__zero_reg__
+ 2433 0be2 9105      		cpc r25,__zero_reg__
+ 2434 0be4 00F4      		brsh .L105
+ 2435               	.LVL157:
+ 2436               	.L106:
+ 454:fat.c         **** 			}
+ 2437               		.loc 1 454 12 view .LVU455
+ 2438 0be6 81E0      		ldi r24,lo8(1)
+ 2439               	.LVL158:
+ 2440               	.L99:
+ 2441               	/* epilogue start */
+ 472:fat.c         **** }
+ 2442               		.loc 1 472 1 view .LVU456
+ 2443 0be8 2896      		adiw r28,8
+ 2444 0bea 0FB6      		in __tmp_reg__,__SREG__
+ 2445 0bec F894      		cli
+ 2446 0bee DEBF      		out __SP_H__,r29
+ 2447 0bf0 0FBE      		out __SREG__,__tmp_reg__
+ 2448 0bf2 CDBF      		out __SP_L__,r28
+ 2449 0bf4 DF91      		pop r29
+ 2450 0bf6 CF91      		pop r28
+ 2451 0bf8 1F91      		pop r17
+ 2452 0bfa 0F91      		pop r16
+ 2453 0bfc FF90      		pop r15
+ 2454 0bfe EF90      		pop r14
+ 2455 0c00 DF90      		pop r13
+ 2456 0c02 CF90      		pop r12
+ 2457 0c04 BF90      		pop r11
+ 2458 0c06 AF90      		pop r10
+ 2459 0c08 9F90      		pop r9
+ 2460 0c0a 8F90      		pop r8
+ 2461 0c0c 7F90      		pop r7
+ 2462 0c0e 6F90      		pop r6
+ 2463 0c10 5F90      		pop r5
+ 2464 0c12 4F90      		pop r4
+ 2465 0c14 0895      		ret
+ 2466               	.LVL159:
+ 2467               	.L105:
+ 452:fat.c         **** 			{
+ 2468               		.loc 1 452 17 discriminator 1 view .LVU457
+ 2469 0c16 0091 0000 		lds r16,_fs+3
+ 2470 0c1a 1091 0000 		lds r17,_fs+3+1
+ 2471 0c1e 2091 0000 		lds r18,_fs+3+2
+ 2472 0c22 3091 0000 		lds r19,_fs+3+3
+ 2473 0c26 6017      		cp r22,r16
+ 2474 0c28 7107      		cpc r23,r17
+ 2475 0c2a 8207      		cpc r24,r18
+ 2476 0c2c 9307      		cpc r25,r19
+ 2477 0c2e 00F4      		brsh .L106
+ 457:fat.c         **** 			fat_ftell += bcs;
+ 2478               		.loc 1 457 4 is_stmt 1 view .LVU458
+ 457:fat.c         **** 			fat_ftell += bcs;
+ 2479               		.loc 1 457 19 is_stmt 0 view .LVU459
+ 2480 0c30 6093 0000 		sts _fs+23,r22
+ 2481 0c34 7093 0000 		sts _fs+23+1,r23
+ 2482 0c38 8093 0000 		sts _fs+23+2,r24
+ 2483 0c3c 9093 0000 		sts _fs+23+3,r25
+ 458:fat.c         **** 			offset -= bcs;
+ 2484               		.loc 1 458 4 is_stmt 1 view .LVU460
+ 458:fat.c         **** 			offset -= bcs;
+ 2485               		.loc 1 458 14 is_stmt 0 view .LVU461
+ 2486 0c40 0091 0000 		lds r16,fat_ftell
+ 2487 0c44 1091 0000 		lds r17,fat_ftell+1
+ 2488 0c48 2091 0000 		lds r18,fat_ftell+2
+ 2489 0c4c 3091 0000 		lds r19,fat_ftell+3
+ 2490 0c50 080D      		add r16,r8
+ 2491 0c52 191D      		adc r17,r9
+ 2492 0c54 2A1D      		adc r18,r10
+ 2493 0c56 3B1D      		adc r19,r11
+ 2494 0c58 0093 0000 		sts fat_ftell,r16
+ 2495 0c5c 1093 0000 		sts fat_ftell+1,r17
+ 2496 0c60 2093 0000 		sts fat_ftell+2,r18
+ 2497 0c64 3093 0000 		sts fat_ftell+3,r19
+ 459:fat.c         **** 		}
+ 2498               		.loc 1 459 4 is_stmt 1 view .LVU462
+ 459:fat.c         **** 		}
+ 2499               		.loc 1 459 11 is_stmt 0 view .LVU463
+ 2500 0c68 C818      		sub r12,r8
+ 2501 0c6a D908      		sbc r13,r9
+ 2502 0c6c EA08      		sbc r14,r10
+ 2503 0c6e FB08      		sbc r15,r11
+ 2504               	.LVL160:
+ 459:fat.c         **** 		}
+ 2505               		.loc 1 459 11 view .LVU464
+ 2506 0c70 00C0      		rjmp .L104
+ 2507               		.cfi_endproc
+ 2508               	.LFE12:
+ 2510               	.global	fat_opendir
+ 2512               	fat_opendir:
+ 2513               	.LVL161:
+ 2514               	.LFB15:
+ 473:fat.c         **** 
+ 474:fat.c         **** /* Directory */
+ 475:fat.c         **** static void get_fileinfo(dir_t *dj, uint8_t *dir, direntry_t *fno)
+ 476:fat.c         **** {
+ 477:fat.c         **** 	uint8_t i, c;
+ 478:fat.c         **** 	char *p;
+ 479:fat.c         **** 	p = fno->name;
+ 480:fat.c         **** 	if(dj->sect)
+ 481:fat.c         **** 	{
+ 482:fat.c         **** 		for(i = 0; i < 8; i++)
+ 483:fat.c         **** 		{
+ 484:fat.c         **** 			c = dir[i];
+ 485:fat.c         **** 			if(c == ' ')
+ 486:fat.c         **** 			{
+ 487:fat.c         **** 				break;
+ 488:fat.c         **** 			}
+ 489:fat.c         **** 
+ 490:fat.c         **** 			if(c == 0x05)
+ 491:fat.c         **** 			{
+ 492:fat.c         **** 				c = 0xE5;
+ 493:fat.c         **** 			}
+ 494:fat.c         **** 
+ 495:fat.c         **** 			*p++ = c;
+ 496:fat.c         **** 		}
+ 497:fat.c         **** 
+ 498:fat.c         **** 		if(dir[8] != ' ')
+ 499:fat.c         **** 		{
+ 500:fat.c         **** 			*p++ = '.';
+ 501:fat.c         **** 			for(i = 8; i < 11; i++)
+ 502:fat.c         **** 			{
+ 503:fat.c         **** 				c = dir[i];
+ 504:fat.c         **** 				if (c == ' ')
+ 505:fat.c         **** 				{
+ 506:fat.c         **** 					break;
+ 507:fat.c         **** 				}
+ 508:fat.c         **** 
+ 509:fat.c         **** 				*p++ = c;
+ 510:fat.c         **** 			}
+ 511:fat.c         **** 		}
+ 512:fat.c         **** 
+ 513:fat.c         **** 		fno->type = dir[DIR_ATTR] & AM_DIR;
+ 514:fat.c         **** 		fno->size = ld_u32(dir + DIR_FILESIZE);
+ 515:fat.c         **** 	}
+ 516:fat.c         **** 
+ 517:fat.c         **** 	*p = 0;
+ 518:fat.c         **** }
+ 519:fat.c         **** 
+ 520:fat.c         **** static uint8_t dir_read(dir_t *dj, uint8_t *dir)
+ 521:fat.c         **** {
+ 522:fat.c         **** 	uint8_t res, a, c;
+ 523:fat.c         **** 	res = 2;
+ 524:fat.c         **** 	while(dj->sect)
+ 525:fat.c         **** 	{
+ 526:fat.c         **** 		if((res = sd_read(dir, dj->sect, (dj->index % 16) * 32, 32)))
+ 527:fat.c         **** 		{
+ 528:fat.c         **** 			break;
+ 529:fat.c         **** 		}
+ 530:fat.c         **** 
+ 531:fat.c         **** 		c = dir[DIR_NAME];
+ 532:fat.c         **** 		if(!c)
+ 533:fat.c         **** 		{
+ 534:fat.c         **** 			res = 2;
+ 535:fat.c         **** 			break;
+ 536:fat.c         **** 		}
+ 537:fat.c         **** 
+ 538:fat.c         **** 		a = dir[DIR_ATTR] & AM_MASK;
+ 539:fat.c         **** 		if(c != 0xE5 && c != '.' && !(a & AM_VOL))
+ 540:fat.c         **** 		{
+ 541:fat.c         **** 			break;
+ 542:fat.c         **** 		}
+ 543:fat.c         **** 
+ 544:fat.c         **** 		if((res = dir_next(dj)))
+ 545:fat.c         **** 		{
+ 546:fat.c         **** 			break;
+ 547:fat.c         **** 		}
+ 548:fat.c         **** 	}
+ 549:fat.c         **** 
+ 550:fat.c         **** 	if(res)
+ 551:fat.c         **** 	{
+ 552:fat.c         **** 		dj->sect = 0;
+ 553:fat.c         **** 	}
+ 554:fat.c         **** 
+ 555:fat.c         **** 	return res;
+ 556:fat.c         **** }
+ 557:fat.c         **** 
+ 558:fat.c         **** uint8_t fat_opendir(dir_t *dj, const char *path)
+ 559:fat.c         **** {
+ 2515               		.loc 1 559 1 is_stmt 1 view -0
+ 2516               		.cfi_startproc
+ 2517               		.loc 1 559 1 is_stmt 0 view .LVU466
+ 2518 0c72 0F93      		push r16
+ 2519               	.LCFI97:
+ 2520               		.cfi_def_cfa_offset 3
+ 2521               		.cfi_offset 16, -2
+ 2522 0c74 1F93      		push r17
+ 2523               	.LCFI98:
+ 2524               		.cfi_def_cfa_offset 4
+ 2525               		.cfi_offset 17, -3
+ 2526 0c76 CF93      		push r28
+ 2527               	.LCFI99:
+ 2528               		.cfi_def_cfa_offset 5
+ 2529               		.cfi_offset 28, -4
+ 2530 0c78 DF93      		push r29
+ 2531               	.LCFI100:
+ 2532               		.cfi_def_cfa_offset 6
+ 2533               		.cfi_offset 29, -5
+ 2534 0c7a CDB7      		in r28,__SP_L__
+ 2535 0c7c DEB7      		in r29,__SP_H__
+ 2536               	.LCFI101:
+ 2537               		.cfi_def_cfa_register 28
+ 2538 0c7e AC97      		sbiw r28,44
+ 2539               	.LCFI102:
+ 2540               		.cfi_def_cfa_offset 50
+ 2541 0c80 0FB6      		in __tmp_reg__,__SREG__
+ 2542 0c82 F894      		cli
+ 2543 0c84 DEBF      		out __SP_H__,r29
+ 2544 0c86 0FBE      		out __SREG__,__tmp_reg__
+ 2545 0c88 CDBF      		out __SP_L__,r28
+ 2546               	/* prologue: function */
+ 2547               	/* frame size = 44 */
+ 2548               	/* stack size = 48 */
+ 2549               	.L__stack_usage = 48
+ 2550 0c8a 8C01      		movw r16,r24
+ 2551 0c8c AB01      		movw r20,r22
+ 560:fat.c         **** 	uint8_t res;
+ 2552               		.loc 1 560 2 is_stmt 1 view .LVU467
+ 561:fat.c         **** 	uint8_t sp[12], dir[32];
+ 2553               		.loc 1 561 2 view .LVU468
+ 562:fat.c         **** 	dj->fn = sp;
+ 2554               		.loc 1 562 2 view .LVU469
+ 2555               		.loc 1 562 9 is_stmt 0 view .LVU470
+ 2556 0c8e CE01      		movw r24,r28
+ 2557               	.LVL162:
+ 2558               		.loc 1 562 9 view .LVU471
+ 2559 0c90 8196      		adiw r24,33
+ 2560 0c92 D801      		movw r26,r16
+ 2561 0c94 1396      		adiw r26,2+1
+ 2562 0c96 9C93      		st X,r25
+ 2563 0c98 8E93      		st -X,r24
+ 2564 0c9a 1297      		sbiw r26,2
+ 563:fat.c         **** 	if(!(res = follow_path(dj, dir, path)))
+ 2565               		.loc 1 563 2 is_stmt 1 view .LVU472
+ 2566               		.loc 1 563 13 is_stmt 0 view .LVU473
+ 2567 0c9c BE01      		movw r22,r28
+ 2568               	.LVL163:
+ 2569               		.loc 1 563 13 view .LVU474
+ 2570 0c9e 6F5F      		subi r22,-1
+ 2571 0ca0 7F4F      		sbci r23,-1
+ 2572 0ca2 C801      		movw r24,r16
+ 2573 0ca4 0E94 0000 		call follow_path
+ 2574               	.LVL164:
+ 2575               		.loc 1 563 4 view .LVU475
+ 2576 0ca8 8111      		cpse r24,__zero_reg__
+ 2577 0caa 00C0      		rjmp .L115
+ 564:fat.c         **** 	{
+ 565:fat.c         **** 		if(dir[0])
+ 2578               		.loc 1 565 3 is_stmt 1 view .LVU476
+ 2579               		.loc 1 565 5 is_stmt 0 view .LVU477
+ 2580 0cac 8981      		ldd r24,Y+1
+ 2581               	.LVL165:
+ 2582               		.loc 1 565 5 view .LVU478
+ 2583 0cae 8823      		tst r24
+ 2584 0cb0 01F0      		breq .L117
+ 566:fat.c         **** 		{
+ 567:fat.c         **** 			if(dir[DIR_ATTR] & AM_DIR)
+ 2585               		.loc 1 567 4 is_stmt 1 view .LVU479
+ 2586               		.loc 1 567 6 is_stmt 0 view .LVU480
+ 2587 0cb2 8C85      		ldd r24,Y+12
+ 2588 0cb4 84FF      		sbrs r24,4
+ 2589 0cb6 00C0      		rjmp .L118
+ 568:fat.c         **** 			{
+ 569:fat.c         **** 				dj->sclust = get_cluster(dir);
+ 2590               		.loc 1 569 5 is_stmt 1 view .LVU481
+ 2591               		.loc 1 569 18 is_stmt 0 view .LVU482
+ 2592 0cb8 CE01      		movw r24,r28
+ 2593 0cba 0196      		adiw r24,1
+ 2594 0cbc 0E94 0000 		call get_cluster
+ 2595               	.LVL166:
+ 2596 0cc0 F801      		movw r30,r16
+ 2597 0cc2 6483      		std Z+4,r22
+ 2598 0cc4 7583      		std Z+5,r23
+ 2599 0cc6 8683      		std Z+6,r24
+ 2600 0cc8 9783      		std Z+7,r25
+ 2601               	.L117:
+ 2602               	.LVL167:
+ 570:fat.c         **** 			}
+ 571:fat.c         **** 			else
+ 572:fat.c         **** 			{
+ 573:fat.c         **** 				res = 2;
+ 574:fat.c         **** 			}
+ 575:fat.c         **** 		}
+ 576:fat.c         **** 
+ 577:fat.c         **** 		if(!res)
+ 2603               		.loc 1 577 3 is_stmt 1 view .LVU483
+ 578:fat.c         **** 		{
+ 579:fat.c         **** 			res = dir_rewind(dj);
+ 2604               		.loc 1 579 4 view .LVU484
+ 2605               		.loc 1 579 10 is_stmt 0 view .LVU485
+ 2606 0cca C801      		movw r24,r16
+ 2607 0ccc 0E94 0000 		call dir_rewind
+ 2608               	.LVL168:
+ 2609               	.L115:
+ 2610               	/* epilogue start */
+ 580:fat.c         **** 		}
+ 581:fat.c         **** 	}
+ 582:fat.c         **** 
+ 583:fat.c         **** 	return res;
+ 584:fat.c         **** }
+ 2611               		.loc 1 584 1 view .LVU486
+ 2612 0cd0 AC96      		adiw r28,44
+ 2613 0cd2 0FB6      		in __tmp_reg__,__SREG__
+ 2614 0cd4 F894      		cli
+ 2615 0cd6 DEBF      		out __SP_H__,r29
+ 2616 0cd8 0FBE      		out __SREG__,__tmp_reg__
+ 2617 0cda CDBF      		out __SP_L__,r28
+ 2618 0cdc DF91      		pop r29
+ 2619 0cde CF91      		pop r28
+ 2620 0ce0 1F91      		pop r17
+ 2621 0ce2 0F91      		pop r16
+ 2622               	.LVL169:
+ 2623               		.loc 1 584 1 view .LVU487
+ 2624 0ce4 0895      		ret
+ 2625               	.LVL170:
+ 2626               	.L118:
+ 573:fat.c         **** 			}
+ 2627               		.loc 1 573 9 view .LVU488
+ 2628 0ce6 82E0      		ldi r24,lo8(2)
+ 2629               	.LVL171:
+ 583:fat.c         **** }
+ 2630               		.loc 1 583 2 is_stmt 1 view .LVU489
+ 583:fat.c         **** }
+ 2631               		.loc 1 583 9 is_stmt 0 view .LVU490
+ 2632 0ce8 00C0      		rjmp .L115
+ 2633               		.cfi_endproc
+ 2634               	.LFE15:
+ 2636               	.global	fat_readdir
+ 2638               	fat_readdir:
+ 2639               	.LVL172:
+ 2640               	.LFB16:
+ 585:fat.c         **** 
+ 586:fat.c         **** uint8_t fat_readdir(dir_t *dj, direntry_t *fno)
+ 587:fat.c         **** {
+ 2641               		.loc 1 587 1 is_stmt 1 view -0
+ 2642               		.cfi_startproc
+ 2643               		.loc 1 587 1 is_stmt 0 view .LVU492
+ 2644 0cea CF92      		push r12
+ 2645               	.LCFI103:
+ 2646               		.cfi_def_cfa_offset 3
+ 2647               		.cfi_offset 12, -2
+ 2648 0cec DF92      		push r13
+ 2649               	.LCFI104:
+ 2650               		.cfi_def_cfa_offset 4
+ 2651               		.cfi_offset 13, -3
+ 2652 0cee EF92      		push r14
+ 2653               	.LCFI105:
+ 2654               		.cfi_def_cfa_offset 5
+ 2655               		.cfi_offset 14, -4
+ 2656 0cf0 FF92      		push r15
+ 2657               	.LCFI106:
+ 2658               		.cfi_def_cfa_offset 6
+ 2659               		.cfi_offset 15, -5
+ 2660 0cf2 0F93      		push r16
+ 2661               	.LCFI107:
+ 2662               		.cfi_def_cfa_offset 7
+ 2663               		.cfi_offset 16, -6
+ 2664 0cf4 1F93      		push r17
+ 2665               	.LCFI108:
+ 2666               		.cfi_def_cfa_offset 8
+ 2667               		.cfi_offset 17, -7
+ 2668 0cf6 CF93      		push r28
+ 2669               	.LCFI109:
+ 2670               		.cfi_def_cfa_offset 9
+ 2671               		.cfi_offset 28, -8
+ 2672 0cf8 DF93      		push r29
+ 2673               	.LCFI110:
+ 2674               		.cfi_def_cfa_offset 10
+ 2675               		.cfi_offset 29, -9
+ 2676 0cfa CDB7      		in r28,__SP_L__
+ 2677 0cfc DEB7      		in r29,__SP_H__
+ 2678               	.LCFI111:
+ 2679               		.cfi_def_cfa_register 28
+ 2680 0cfe AC97      		sbiw r28,44
+ 2681               	.LCFI112:
+ 2682               		.cfi_def_cfa_offset 54
+ 2683 0d00 0FB6      		in __tmp_reg__,__SREG__
+ 2684 0d02 F894      		cli
+ 2685 0d04 DEBF      		out __SP_H__,r29
+ 2686 0d06 0FBE      		out __SREG__,__tmp_reg__
+ 2687 0d08 CDBF      		out __SP_L__,r28
+ 2688               	/* prologue: function */
+ 2689               	/* frame size = 44 */
+ 2690               	/* stack size = 52 */
+ 2691               	.L__stack_usage = 52
+ 2692 0d0a 7C01      		movw r14,r24
+ 2693 0d0c 6B01      		movw r12,r22
+ 588:fat.c         **** 	uint8_t res;
+ 2694               		.loc 1 588 2 is_stmt 1 view .LVU493
+ 589:fat.c         **** 	uint8_t sp[12], dir[32];
+ 2695               		.loc 1 589 2 view .LVU494
+ 590:fat.c         **** 	dj->fn = sp;
+ 2696               		.loc 1 590 2 view .LVU495
+ 2697               		.loc 1 590 9 is_stmt 0 view .LVU496
+ 2698 0d0e CE01      		movw r24,r28
+ 2699               	.LVL173:
+ 2700               		.loc 1 590 9 view .LVU497
+ 2701 0d10 8196      		adiw r24,33
+ 2702 0d12 D701      		movw r26,r14
+ 2703 0d14 1396      		adiw r26,2+1
+ 2704 0d16 9C93      		st X,r25
+ 2705 0d18 8E93      		st -X,r24
+ 2706 0d1a 1297      		sbiw r26,2
+ 591:fat.c         **** 	if(!fno)
+ 2707               		.loc 1 591 2 is_stmt 1 view .LVU498
+ 2708               	.LBB24:
+ 2709               	.LBB25:
+ 523:fat.c         **** 	while(dj->sect)
+ 2710               		.loc 1 523 6 is_stmt 0 view .LVU499
+ 2711 0d1c 82E0      		ldi r24,lo8(2)
+ 2712               	.LBE25:
+ 2713               	.LBE24:
+ 2714               		.loc 1 591 4 view .LVU500
+ 2715 0d1e 672B      		or r22,r23
+ 2716 0d20 01F4      		brne .L123
+ 592:fat.c         **** 	{
+ 593:fat.c         **** 		res = dir_rewind(dj);
+ 2717               		.loc 1 593 3 is_stmt 1 view .LVU501
+ 2718               		.loc 1 593 9 is_stmt 0 view .LVU502
+ 2719 0d22 C701      		movw r24,r14
+ 2720 0d24 0E94 0000 		call dir_rewind
+ 2721               	.LVL174:
+ 2722               	.L122:
+ 2723               	/* epilogue start */
+ 594:fat.c         **** 	}
+ 595:fat.c         **** 	else
+ 596:fat.c         **** 	{
+ 597:fat.c         **** 		if((res = dir_read(dj, dir)) == 2)
+ 598:fat.c         **** 		{
+ 599:fat.c         **** 			res = 0;
+ 600:fat.c         **** 		}
+ 601:fat.c         **** 
+ 602:fat.c         **** 		if(!res)
+ 603:fat.c         **** 		{
+ 604:fat.c         **** 			get_fileinfo(dj, dir, fno);
+ 605:fat.c         **** 			if((res = dir_next(dj)) == 2)
+ 606:fat.c         **** 			{
+ 607:fat.c         **** 				res = 0;
+ 608:fat.c         **** 			}
+ 609:fat.c         **** 		}
+ 610:fat.c         **** 	}
+ 611:fat.c         **** 
+ 612:fat.c         **** 	return res;
+ 613:fat.c         **** }
+ 2724               		.loc 1 613 1 view .LVU503
+ 2725 0d28 AC96      		adiw r28,44
+ 2726 0d2a 0FB6      		in __tmp_reg__,__SREG__
+ 2727 0d2c F894      		cli
+ 2728 0d2e DEBF      		out __SP_H__,r29
+ 2729 0d30 0FBE      		out __SREG__,__tmp_reg__
+ 2730 0d32 CDBF      		out __SP_L__,r28
+ 2731 0d34 DF91      		pop r29
+ 2732 0d36 CF91      		pop r28
+ 2733 0d38 1F91      		pop r17
+ 2734 0d3a 0F91      		pop r16
+ 2735 0d3c FF90      		pop r15
+ 2736 0d3e EF90      		pop r14
+ 2737               	.LVL175:
+ 2738               		.loc 1 613 1 view .LVU504
+ 2739 0d40 DF90      		pop r13
+ 2740 0d42 CF90      		pop r12
+ 2741               	.LVL176:
+ 2742               		.loc 1 613 1 view .LVU505
+ 2743 0d44 0895      		ret
+ 2744               	.LVL177:
+ 2745               	.L128:
+ 2746               	.LBB29:
+ 2747               	.LBB26:
+ 526:fat.c         **** 		{
+ 2748               		.loc 1 526 3 is_stmt 1 view .LVU506
+ 526:fat.c         **** 		{
+ 2749               		.loc 1 526 47 is_stmt 0 view .LVU507
+ 2750 0d46 F701      		movw r30,r14
+ 2751 0d48 2081      		ld r18,Z
+ 2752 0d4a 3181      		ldd r19,Z+1
+ 2753 0d4c 2F70      		andi r18,15
+ 2754 0d4e 3327      		clr r19
+ 526:fat.c         **** 		{
+ 2755               		.loc 1 526 13 view .LVU508
+ 2756 0d50 85E0      		ldi r24,5
+ 2757               		1:
+ 2758 0d52 220F      		lsl r18
+ 2759 0d54 331F      		rol r19
+ 2760 0d56 8A95      		dec r24
+ 2761 0d58 01F4      		brne 1b
+ 2762               	.LVL178:
+ 526:fat.c         **** 		{
+ 2763               		.loc 1 526 13 view .LVU509
+ 2764 0d5a 00E2      		ldi r16,lo8(32)
+ 2765 0d5c 10E0      		ldi r17,0
+ 2766 0d5e CE01      		movw r24,r28
+ 2767 0d60 0196      		adiw r24,1
+ 2768 0d62 0E94 0000 		call sd_read
+ 2769               	.LVL179:
+ 526:fat.c         **** 		{
+ 2770               		.loc 1 526 5 view .LVU510
+ 2771 0d66 8111      		cpse r24,__zero_reg__
+ 2772 0d68 00C0      		rjmp .L125
+ 531:fat.c         **** 		if(!c)
+ 2773               		.loc 1 531 3 is_stmt 1 view .LVU511
+ 531:fat.c         **** 		if(!c)
+ 2774               		.loc 1 531 5 is_stmt 0 view .LVU512
+ 2775 0d6a 8981      		ldd r24,Y+1
+ 2776               	.LVL180:
+ 532:fat.c         **** 		{
+ 2777               		.loc 1 532 3 is_stmt 1 view .LVU513
+ 532:fat.c         **** 		{
+ 2778               		.loc 1 532 5 is_stmt 0 view .LVU514
+ 2779 0d6c 8823      		tst r24
+ 2780 0d6e 01F0      		breq .L139
+ 538:fat.c         **** 		if(c != 0xE5 && c != '.' && !(a & AM_VOL))
+ 2781               		.loc 1 538 3 is_stmt 1 view .LVU515
+ 2782               	.LVL181:
+ 539:fat.c         **** 		{
+ 2783               		.loc 1 539 3 view .LVU516
+ 539:fat.c         **** 		{
+ 2784               		.loc 1 539 5 is_stmt 0 view .LVU517
+ 2785 0d70 853E      		cpi r24,lo8(-27)
+ 2786 0d72 01F0      		breq .L126
+ 539:fat.c         **** 		{
+ 2787               		.loc 1 539 16 view .LVU518
+ 2788 0d74 8E32      		cpi r24,lo8(46)
+ 2789 0d76 01F0      		breq .L126
+ 539:fat.c         **** 		{
+ 2790               		.loc 1 539 28 view .LVU519
+ 2791 0d78 8C85      		ldd r24,Y+12
+ 2792               	.LVL182:
+ 539:fat.c         **** 		{
+ 2793               		.loc 1 539 28 view .LVU520
+ 2794 0d7a 83FF      		sbrs r24,3
+ 2795 0d7c 00C0      		rjmp .L127
+ 2796               	.L126:
+ 544:fat.c         **** 		{
+ 2797               		.loc 1 544 3 is_stmt 1 view .LVU521
+ 544:fat.c         **** 		{
+ 2798               		.loc 1 544 13 is_stmt 0 view .LVU522
+ 2799 0d7e C701      		movw r24,r14
+ 2800 0d80 0E94 0000 		call dir_next
+ 2801               	.LVL183:
+ 544:fat.c         **** 		{
+ 2802               		.loc 1 544 5 view .LVU523
+ 2803 0d84 8823      		tst r24
+ 2804 0d86 01F0      		breq .L123
+ 2805               	.LVL184:
+ 2806               	.L125:
+ 552:fat.c         **** 	}
+ 2807               		.loc 1 552 3 is_stmt 1 view .LVU524
+ 552:fat.c         **** 	}
+ 2808               		.loc 1 552 12 is_stmt 0 view .LVU525
+ 2809 0d88 D701      		movw r26,r14
+ 2810 0d8a 1C96      		adiw r26,12
+ 2811 0d8c 1D92      		st X+,__zero_reg__
+ 2812 0d8e 1D92      		st X+,__zero_reg__
+ 2813 0d90 1D92      		st X+,__zero_reg__
+ 2814 0d92 1C92      		st X,__zero_reg__
+ 2815 0d94 1F97      		sbiw r26,12+3
+ 555:fat.c         **** }
+ 2816               		.loc 1 555 2 is_stmt 1 view .LVU526
+ 2817               	.LVL185:
+ 555:fat.c         **** }
+ 2818               		.loc 1 555 2 is_stmt 0 view .LVU527
+ 2819               	.LBE26:
+ 2820               	.LBE29:
+ 597:fat.c         **** 		{
+ 2821               		.loc 1 597 5 view .LVU528
+ 2822 0d96 8230      		cpi r24,lo8(2)
+ 2823 0d98 01F4      		brne .L122
+ 597:fat.c         **** 		{
+ 2824               		.loc 1 597 5 view .LVU529
+ 2825 0d9a 00C0      		rjmp .L127
+ 2826               	.LVL186:
+ 2827               	.L123:
+ 2828               	.LBB30:
+ 2829               	.LBB27:
+ 524:fat.c         **** 	{
+ 2830               		.loc 1 524 10 view .LVU530
+ 2831 0d9c D701      		movw r26,r14
+ 2832 0d9e 1C96      		adiw r26,12
+ 2833 0da0 4D91      		ld r20,X+
+ 2834 0da2 5D91      		ld r21,X+
+ 2835 0da4 6D91      		ld r22,X+
+ 2836 0da6 7C91      		ld r23,X
+ 2837 0da8 1F97      		sbiw r26,12+3
+ 524:fat.c         **** 	{
+ 2838               		.loc 1 524 7 view .LVU531
+ 2839 0daa 4115      		cp r20,__zero_reg__
+ 2840 0dac 5105      		cpc r21,__zero_reg__
+ 2841 0dae 6105      		cpc r22,__zero_reg__
+ 2842 0db0 7105      		cpc r23,__zero_reg__
+ 2843 0db2 01F4      		brne .L128
+ 550:fat.c         **** 	{
+ 2844               		.loc 1 550 2 is_stmt 1 view .LVU532
+ 550:fat.c         **** 	{
+ 2845               		.loc 1 550 4 is_stmt 0 view .LVU533
+ 2846 0db4 8111      		cpse r24,__zero_reg__
+ 2847 0db6 00C0      		rjmp .L125
+ 2848               	.LVL187:
+ 2849               	.L127:
+ 555:fat.c         **** }
+ 2850               		.loc 1 555 2 is_stmt 1 view .LVU534
+ 555:fat.c         **** }
+ 2851               		.loc 1 555 2 is_stmt 0 view .LVU535
+ 2852               	.LBE27:
+ 2853               	.LBE30:
+ 602:fat.c         **** 		{
+ 2854               		.loc 1 602 3 is_stmt 1 view .LVU536
+ 604:fat.c         **** 			if((res = dir_next(dj)) == 2)
+ 2855               		.loc 1 604 4 view .LVU537
+ 2856               	.LBB31:
+ 2857               	.LBI31:
+ 475:fat.c         **** {
+ 2858               		.loc 1 475 13 view .LVU538
+ 2859               	.LBB32:
+ 477:fat.c         **** 	char *p;
+ 2860               		.loc 1 477 2 view .LVU539
+ 478:fat.c         **** 	p = fno->name;
+ 2861               		.loc 1 478 2 view .LVU540
+ 479:fat.c         **** 	if(dj->sect)
+ 2862               		.loc 1 479 2 view .LVU541
+ 479:fat.c         **** 	if(dj->sect)
+ 2863               		.loc 1 479 4 is_stmt 0 view .LVU542
+ 2864 0db8 8601      		movw r16,r12
+ 2865 0dba 0B5F      		subi r16,-5
+ 2866 0dbc 1F4F      		sbci r17,-1
+ 2867               	.LVL188:
+ 480:fat.c         **** 	{
+ 2868               		.loc 1 480 2 is_stmt 1 view .LVU543
+ 480:fat.c         **** 	{
+ 2869               		.loc 1 480 4 is_stmt 0 view .LVU544
+ 2870 0dbe F701      		movw r30,r14
+ 2871 0dc0 8485      		ldd r24,Z+12
+ 2872 0dc2 9585      		ldd r25,Z+13
+ 2873 0dc4 A685      		ldd r26,Z+14
+ 2874 0dc6 B785      		ldd r27,Z+15
+ 2875 0dc8 892B      		or r24,r25
+ 2876 0dca 8A2B      		or r24,r26
+ 2877 0dcc 8B2B      		or r24,r27
+ 2878 0dce 01F4      		brne .L130
+ 2879               	.L131:
+ 517:fat.c         **** }
+ 2880               		.loc 1 517 2 is_stmt 1 view .LVU545
+ 517:fat.c         **** }
+ 2881               		.loc 1 517 5 is_stmt 0 view .LVU546
+ 2882 0dd0 D801      		movw r26,r16
+ 2883 0dd2 1C92      		st X,__zero_reg__
+ 2884               	.LVL189:
+ 517:fat.c         **** }
+ 2885               		.loc 1 517 5 view .LVU547
+ 2886               	.LBE32:
+ 2887               	.LBE31:
+ 605:fat.c         **** 			{
+ 2888               		.loc 1 605 4 is_stmt 1 view .LVU548
+ 605:fat.c         **** 			{
+ 2889               		.loc 1 605 14 is_stmt 0 view .LVU549
+ 2890 0dd4 C701      		movw r24,r14
+ 2891 0dd6 0E94 0000 		call dir_next
+ 2892               	.LVL190:
+ 605:fat.c         **** 			{
+ 2893               		.loc 1 605 6 view .LVU550
+ 2894 0dda 8230      		cpi r24,lo8(2)
+ 2895 0ddc 01F0      		breq .+2
+ 2896 0dde 00C0      		rjmp .L122
+ 607:fat.c         **** 			}
+ 2897               		.loc 1 607 9 view .LVU551
+ 2898 0de0 80E0      		ldi r24,0
+ 2899               	.LVL191:
+ 612:fat.c         **** }
+ 2900               		.loc 1 612 2 is_stmt 1 view .LVU552
+ 612:fat.c         **** }
+ 2901               		.loc 1 612 9 is_stmt 0 view .LVU553
+ 2902 0de2 00C0      		rjmp .L122
+ 2903               	.LVL192:
+ 2904               	.L139:
+ 2905               	.LBB34:
+ 2906               	.LBB28:
+ 534:fat.c         **** 			break;
+ 2907               		.loc 1 534 8 view .LVU554
+ 2908 0de4 82E0      		ldi r24,lo8(2)
+ 2909               	.LVL193:
+ 534:fat.c         **** 			break;
+ 2910               		.loc 1 534 8 view .LVU555
+ 2911 0de6 00C0      		rjmp .L125
+ 2912               	.LVL194:
+ 2913               	.L130:
+ 534:fat.c         **** 			break;
+ 2914               		.loc 1 534 8 view .LVU556
+ 2915 0de8 DE01      		movw r26,r28
+ 2916 0dea 1196      		adiw r26,1
+ 2917 0dec 9601      		movw r18,r12
+ 2918 0dee 235F      		subi r18,-13
+ 2919 0df0 3F4F      		sbci r19,-1
+ 2920               	.L134:
+ 2921               	.LVL195:
+ 534:fat.c         **** 			break;
+ 2922               		.loc 1 534 8 view .LVU557
+ 2923               	.LBE28:
+ 2924               	.LBE34:
+ 2925               	.LBB35:
+ 2926               	.LBB33:
+ 484:fat.c         **** 			if(c == ' ')
+ 2927               		.loc 1 484 4 is_stmt 1 view .LVU558
+ 484:fat.c         **** 			if(c == ' ')
+ 2928               		.loc 1 484 6 is_stmt 0 view .LVU559
+ 2929 0df2 8D91      		ld r24,X+
+ 2930               	.LVL196:
+ 485:fat.c         **** 			{
+ 2931               		.loc 1 485 4 is_stmt 1 view .LVU560
+ 485:fat.c         **** 			{
+ 2932               		.loc 1 485 6 is_stmt 0 view .LVU561
+ 2933 0df4 8032      		cpi r24,lo8(32)
+ 2934 0df6 01F0      		breq .L132
+ 490:fat.c         **** 			{
+ 2935               		.loc 1 490 4 is_stmt 1 view .LVU562
+ 490:fat.c         **** 			{
+ 2936               		.loc 1 490 6 is_stmt 0 view .LVU563
+ 2937 0df8 8530      		cpi r24,lo8(5)
+ 2938 0dfa 01F4      		brne .L133
+ 492:fat.c         **** 			}
+ 2939               		.loc 1 492 7 view .LVU564
+ 2940 0dfc 85EE      		ldi r24,lo8(-27)
+ 2941               	.LVL197:
+ 2942               	.L133:
+ 495:fat.c         **** 		}
+ 2943               		.loc 1 495 4 is_stmt 1 view .LVU565
+ 495:fat.c         **** 		}
+ 2944               		.loc 1 495 6 is_stmt 0 view .LVU566
+ 2945 0dfe F801      		movw r30,r16
+ 2946               	.LVL198:
+ 495:fat.c         **** 		}
+ 2947               		.loc 1 495 9 view .LVU567
+ 2948 0e00 8193      		st Z+,r24
+ 2949               	.LVL199:
+ 482:fat.c         **** 		{
+ 2950               		.loc 1 482 3 view .LVU568
+ 2951 0e02 E217      		cp r30,r18
+ 2952 0e04 F307      		cpc r31,r19
+ 2953 0e06 01F4      		brne .L140
+ 2954 0e08 8901      		movw r16,r18
+ 2955               	.LVL200:
+ 2956               	.L132:
+ 498:fat.c         **** 		{
+ 2957               		.loc 1 498 3 is_stmt 1 view .LVU569
+ 498:fat.c         **** 		{
+ 2958               		.loc 1 498 9 is_stmt 0 view .LVU570
+ 2959 0e0a 8985      		ldd r24,Y+9
+ 2960               	.LVL201:
+ 498:fat.c         **** 		{
+ 2961               		.loc 1 498 5 view .LVU571
+ 2962 0e0c 8032      		cpi r24,lo8(32)
+ 2963 0e0e 01F0      		breq .L135
+ 500:fat.c         **** 			for(i = 8; i < 11; i++)
+ 2964               		.loc 1 500 4 is_stmt 1 view .LVU572
+ 2965               	.LVL202:
+ 500:fat.c         **** 			for(i = 8; i < 11; i++)
+ 2966               		.loc 1 500 9 is_stmt 0 view .LVU573
+ 2967 0e10 9EE2      		ldi r25,lo8(46)
+ 2968 0e12 F801      		movw r30,r16
+ 2969 0e14 9083      		st Z,r25
+ 501:fat.c         **** 			{
+ 2970               		.loc 1 501 4 is_stmt 1 view .LVU574
+ 2971               	.LVL203:
+ 503:fat.c         **** 				if (c == ' ')
+ 2972               		.loc 1 503 5 view .LVU575
+ 504:fat.c         **** 				{
+ 2973               		.loc 1 504 5 view .LVU576
+ 509:fat.c         **** 			}
+ 2974               		.loc 1 509 5 view .LVU577
+ 509:fat.c         **** 			}
+ 2975               		.loc 1 509 10 is_stmt 0 view .LVU578
+ 2976 0e16 8183      		std Z+1,r24
+ 2977               	.LVL204:
+ 503:fat.c         **** 				if (c == ' ')
+ 2978               		.loc 1 503 5 is_stmt 1 view .LVU579
+ 503:fat.c         **** 				if (c == ' ')
+ 2979               		.loc 1 503 7 is_stmt 0 view .LVU580
+ 2980 0e18 8A85      		ldd r24,Y+10
+ 2981               	.LVL205:
+ 504:fat.c         **** 				{
+ 2982               		.loc 1 504 5 is_stmt 1 view .LVU581
+ 504:fat.c         **** 				{
+ 2983               		.loc 1 504 8 is_stmt 0 view .LVU582
+ 2984 0e1a 8032      		cpi r24,lo8(32)
+ 2985 0e1c 01F4      		brne .L136
+ 509:fat.c         **** 			}
+ 2986               		.loc 1 509 7 view .LVU583
+ 2987 0e1e 0E5F      		subi r16,-2
+ 2988 0e20 1F4F      		sbci r17,-1
+ 2989               	.LVL206:
+ 2990               	.L135:
+ 513:fat.c         **** 		fno->size = ld_u32(dir + DIR_FILESIZE);
+ 2991               		.loc 1 513 3 is_stmt 1 view .LVU584
+ 513:fat.c         **** 		fno->size = ld_u32(dir + DIR_FILESIZE);
+ 2992               		.loc 1 513 29 is_stmt 0 view .LVU585
+ 2993 0e22 8C85      		ldd r24,Y+12
+ 2994 0e24 8071      		andi r24,lo8(16)
+ 513:fat.c         **** 		fno->size = ld_u32(dir + DIR_FILESIZE);
+ 2995               		.loc 1 513 13 view .LVU586
+ 2996 0e26 D601      		movw r26,r12
+ 2997 0e28 1496      		adiw r26,4
+ 2998 0e2a 8C93      		st X,r24
+ 514:fat.c         **** 	}
+ 2999               		.loc 1 514 3 is_stmt 1 view .LVU587
+ 514:fat.c         **** 	}
+ 3000               		.loc 1 514 15 is_stmt 0 view .LVU588
+ 3001 0e2c CE01      		movw r24,r28
+ 3002 0e2e 4D96      		adiw r24,29
+ 3003 0e30 0E94 0000 		call ld_u32
+ 3004               	.LVL207:
+ 3005 0e34 F601      		movw r30,r12
+ 3006 0e36 6083      		st Z,r22
+ 3007 0e38 7183      		std Z+1,r23
+ 3008 0e3a 8283      		std Z+2,r24
+ 3009 0e3c 9383      		std Z+3,r25
+ 3010 0e3e 00C0      		rjmp .L131
+ 3011               	.LVL208:
+ 3012               	.L140:
+ 514:fat.c         **** 	}
+ 3013               		.loc 1 514 15 view .LVU589
+ 3014 0e40 8F01      		movw r16,r30
+ 3015 0e42 00C0      		rjmp .L134
+ 3016               	.LVL209:
+ 3017               	.L136:
+ 509:fat.c         **** 			}
+ 3018               		.loc 1 509 5 is_stmt 1 view .LVU590
+ 509:fat.c         **** 			}
+ 3019               		.loc 1 509 10 is_stmt 0 view .LVU591
+ 3020 0e44 8283      		std Z+2,r24
+ 3021               	.LVL210:
+ 503:fat.c         **** 				if (c == ' ')
+ 3022               		.loc 1 503 5 is_stmt 1 view .LVU592
+ 503:fat.c         **** 				if (c == ' ')
+ 3023               		.loc 1 503 7 is_stmt 0 view .LVU593
+ 3024 0e46 8B85      		ldd r24,Y+11
+ 3025               	.LVL211:
+ 504:fat.c         **** 				{
+ 3026               		.loc 1 504 5 is_stmt 1 view .LVU594
+ 504:fat.c         **** 				{
+ 3027               		.loc 1 504 8 is_stmt 0 view .LVU595
+ 3028 0e48 8032      		cpi r24,lo8(32)
+ 3029 0e4a 01F4      		brne .L137
+ 509:fat.c         **** 			}
+ 3030               		.loc 1 509 7 view .LVU596
+ 3031 0e4c 0D5F      		subi r16,-3
+ 3032 0e4e 1F4F      		sbci r17,-1
+ 3033               	.LVL212:
+ 509:fat.c         **** 			}
+ 3034               		.loc 1 509 7 view .LVU597
+ 3035 0e50 00C0      		rjmp .L135
+ 3036               	.LVL213:
+ 3037               	.L137:
+ 509:fat.c         **** 			}
+ 3038               		.loc 1 509 5 is_stmt 1 view .LVU598
+ 509:fat.c         **** 			}
+ 3039               		.loc 1 509 10 is_stmt 0 view .LVU599
+ 3040 0e52 8383      		std Z+3,r24
+ 3041               	.LVL214:
+ 509:fat.c         **** 			}
+ 3042               		.loc 1 509 7 view .LVU600
+ 3043 0e54 0C5F      		subi r16,-4
+ 3044 0e56 1F4F      		sbci r17,-1
+ 3045               	.LVL215:
+ 509:fat.c         **** 			}
+ 3046               		.loc 1 509 7 view .LVU601
+ 3047 0e58 00C0      		rjmp .L135
+ 3048               	.LBE33:
+ 3049               	.LBE35:
+ 3050               		.cfi_endproc
+ 3051               	.LFE16:
+ 3053               		.comm	fat_ftell,4,1
+ 3054               		.comm	fat_fsize,4,1
+ 3055               		.local	_fs
+ 3056               		.comm	_fs,31,1
+ 3057               	.Letext0:
+ 3058               		.file 2 "/usr/avr/include/stdint.h"
+ 3059               		.file 3 "fat.h"
+ 3060               		.file 4 "sd.h"
+ 3061               		.file 5 "util.h"
+DEFINED SYMBOLS
+                            *ABS*:0000000000000000 fat.c
+     /tmp/ccohmLa7.s:2      *ABS*:000000000000003e __SP_H__
+     /tmp/ccohmLa7.s:3      *ABS*:000000000000003d __SP_L__
+     /tmp/ccohmLa7.s:4      *ABS*:000000000000003f __SREG__
+     /tmp/ccohmLa7.s:5      *ABS*:0000000000000000 __tmp_reg__
+     /tmp/ccohmLa7.s:6      *ABS*:0000000000000001 __zero_reg__
+     /tmp/ccohmLa7.s:11     .text:0000000000000000 clust2sect
+                             .bss:0000000000000000 _fs
+     /tmp/ccohmLa7.s:117    .text:0000000000000092 dir_rewind
+     /tmp/ccohmLa7.s:227    .text:000000000000010a get_cluster
+     /tmp/ccohmLa7.s:330    .text:000000000000016a get_fat
+     /tmp/ccohmLa7.s:481    .text:0000000000000230 dir_next
+     /tmp/ccohmLa7.s:714    .text:0000000000000352 check_fs
+     /tmp/ccohmLa7.s:843    .text:00000000000003ce follow_path
+     /tmp/ccohmLa7.s:1240   .text:000000000000053e fat_mount
+     /tmp/ccohmLa7.s:1616   .text:0000000000000756 fat_fopen
+                            *COM*:0000000000000004 fat_fsize
+                            *COM*:0000000000000004 fat_ftell
+     /tmp/ccohmLa7.s:1729   .text:00000000000007ea fat_fread
+     /tmp/ccohmLa7.s:2099   .text:00000000000009f6 fat_fseek
+     /tmp/ccohmLa7.s:2512   .text:0000000000000c72 fat_opendir
+     /tmp/ccohmLa7.s:2638   .text:0000000000000cea fat_readdir
+
+UNDEFINED SYMBOLS
+__muluhisi3
+ld_u16
+sd_read
+ld_u32
+mem_cmp
+mem_set
+__udivmodsi4
+__do_clear_bss
